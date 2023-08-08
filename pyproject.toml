@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools >= 58.0"]
+
+[project]
+name = "dask-operator"
+version = "1.0.0"
+dependencies = [
+  'kubernetes_asyncio',
+  'kopf',
+]
+
+[tool.setuptools.package-data]
+dask_operator = ["*.yaml"]
+
+[project.optional-dependencies]
+dev = [
+  'pytest',
+  'pytest-asyncio',
+  'pip-tools',
+]
+
+[tool.pytest.ini_options]
+asyncio_mode="auto"
