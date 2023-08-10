@@ -36,27 +36,32 @@ async def logout(memo: kopf.Memo, **kwargs):
 async def create_cluster(
     name: str, namespace: str, spec: kopf.Spec, memo: kopf.Memo, **kwargs
 ):
+    v1 = client.CoreV1Api(memo["api"])
     appsv1 = client.AppsV1Api(memo["api"])
-    labels = {
-        "dask.charmtx.com/cluster-name": name,
-    }
+    labels = {"dask.charmtx.com/cluster-name": name}
 
     scheduler_labels = {**labels, "dask.charmtx.com/role": "scheduler"}
-    scheduler_template = spec["scheduler"]["template"]
-    scheduler_template["spec"]["containers"] = templates.scheduler_containers(
-        scheduler_template["spec"]["containers"]
-    )
-    scheduler_template.setdefault("metadata", {}).setdefault("labels", {})
-    scheduler_template["metadata"]["labels"] |= scheduler_labels
-
-    scheduler = {
-        "metadata": {"generateName": f"{name}-", "labels": scheduler_labels},
+    scheduler_replicaset = {
+        "metadata": {"generateName": f"{name}-scheduler-", "labels": scheduler_labels},
         "spec": client.V1ReplicaSetSpec(
             replicas=1,
             selector={"matchLabels": scheduler_labels},
-            template=scheduler_template,
+            template=templates.scheduler_template(
+                spec["scheduler"]["template"], scheduler_labels
+            ),
         ),
     }
+    kopf.adopt(scheduler_replicaset)
 
-    kopf.adopt(scheduler)
-    await appsv1.create_namespaced_replica_set(namespace=namespace, body=scheduler)
+    scheduler_service = {
+        "metadata": {"name": f"{name}-scheduler", "labels": scheduler_labels},
+        "spec": templates.scheduler_service(
+            spec["scheduler"].get("service", {}), scheduler_labels
+        ),
+    }
+    kopf.adopt(scheduler_service)
+
+    await appsv1.create_namespaced_replica_set(
+        namespace=namespace, body=scheduler_replicaset
+    )
+    await v1.create_namespaced_service(namespace=namespace, body=scheduler_service)

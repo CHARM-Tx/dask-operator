@@ -107,12 +107,26 @@ async def test_create(operator, api: ApiClient):
 
     v1 = client.CoreV1Api(api)
     w = watch.Watch()
-    matching_objects = 0
+    matching_pods = 0
     async for event in w.stream(
-        v1.list_namespaced_pod, namespace=r["metadata"]["namespace"], timeout_seconds=10
+        v1.list_namespaced_pod,
+        namespace=r["metadata"]["namespace"],
+        label_selector="dask.charmtx.com/role=scheduler",
+        timeout_seconds=10,
     ):
         assert event["object"].metadata.name.startswith("test-")
-        matching_objects += 1
+        matching_pods += 1
+        w.stop()
+
+    matching_services = 0
+    async for event in w.stream(
+        v1.list_namespaced_service,
+        namespace=r["metadata"]["namespace"],
+        label_selector="dask.charmtx.com/role=scheduler",
+        timeout_seconds=10,
+    ):
+        assert event["object"].metadata.name.startswith("test-")
+        matching_services += 1
         w.stop()
 
     await custom.delete_namespaced_custom_object(
@@ -123,4 +137,5 @@ async def test_create(operator, api: ApiClient):
         r["metadata"]["name"],
     )
 
-    assert matching_objects == 1
+    assert matching_pods == 1
+    assert matching_services == 1

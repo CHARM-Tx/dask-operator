@@ -1,5 +1,7 @@
 from typing import Any
 
+from kubernetes_asyncio import client
+
 
 # This is a hacky imitation of k8s strategic-merge patches, which aren't
 # supported for CRDs.
@@ -37,16 +39,35 @@ scheduler_container = {
     },
 }
 
-scheduler_ports = [
-    {"name": "tcp-comm", "containerPort": 8786, "protocol": "TCP"},
-    {"name": "http-dashboard", "containerPort": 8787, "protocol": "TCP"},
+scheduler_ports = {"tcp-comm": 8786, "http-dashboard": 8787}
+
+scheduler_template_ports = [
+    {"name": name, "containerPort": port, "protocol": "TCP"}
+    for name, port in scheduler_ports.items()
+]
+
+scheduler_service_ports = [
+    {"name": name, "port": port, "targetPort": name, "protocol": "TCP"}
+    for name, port in scheduler_ports.items()
 ]
 
 
-def scheduler_containers(spec) -> list[dict[str, Any]]:
-    containers = {c["name"]: c for c in spec}
+def scheduler_template(template, labels) -> list[dict[str, Any]]:
+    metadata = template.get("metadata", {})
+    labels = metadata.get("labels", {}) | labels
+
+    containers = {c["name"]: c for c in template["spec"]["containers"]}
     containers["scheduler"] = scheduler_container | containers["scheduler"]
     containers["scheduler"]["ports"] = merge(
-        containers["scheduler"].get("ports", []), scheduler_ports
+        scheduler_template_ports, containers["scheduler"].get("ports", [])
     )
-    return list(containers.values())
+
+    return {
+        "metadata": {**metadata, "labels": labels},
+        "spec": {**template["spec"], "containers": list(containers.values())},
+    }
+
+
+def scheduler_service(spec, labels) -> list[dict[str, Any]]:
+    spec = spec | {"ports": merge(scheduler_service_ports, spec.get("ports", {}))}
+    return client.V1ServiceSpec(**spec, selector=spec.get("selector", {}) | labels)

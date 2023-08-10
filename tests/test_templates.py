@@ -23,11 +23,31 @@ def test_merge():
     assert update_ref == update
 
 
-def test_scheduler_containers():
-    containers = [{"name": "scheduler", "image": "ghcr.io/dask/dask:latest"}]
-    new_containers = templates.scheduler_containers(containers)
+def test_scheduler_template():
+    template = {
+        "spec": {
+            "containers": [{"name": "scheduler", "image": "ghcr.io/dask/dask:latest"}]
+        }
+    }
+    labels = {"foo": "bar"}
+    new_template = templates.scheduler_template(template, labels)
 
     by_key = op.itemgetter("name")
-    assert sorted(new_containers[0]["ports"], key=by_key) == sorted(
-        templates.scheduler_ports, key=by_key
+    assert sorted(new_template["spec"]["containers"][0]["ports"], key=by_key) == sorted(
+        templates.scheduler_template_ports, key=by_key
     )
+
+    assert new_template["metadata"]["labels"] == labels
+
+
+def test_scheduler_service():
+    spec = {}
+    labels = {"foo": "bar"}
+    new_spec = templates.scheduler_service(spec, labels)
+
+    by_key = op.itemgetter("name")
+    assert sorted(new_spec.ports, key=by_key) == sorted(
+        templates.scheduler_service_ports, key=by_key
+    )
+
+    assert new_spec.selector == labels
