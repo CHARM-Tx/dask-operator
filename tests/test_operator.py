@@ -57,7 +57,10 @@ async def crd(api: ApiClient):
         apiextensions.list_custom_resource_definition, timeout_seconds=10
     ):
         assert event["object"].metadata.name == r.metadata.name
-        if event["object"].status.accepted_names == r.spec.names:
+        if any(
+            c.type == "Established" and c.status == "True"
+            for c in event["object"].status.conditions or []
+        ):
             w.stop()
 
     yield r
@@ -65,7 +68,7 @@ async def crd(api: ApiClient):
 
 
 @pytest.fixture(scope="session")
-def operator(kubeconfig):
+async def operator(kubeconfig, crd):
     with pytest.MonkeyPatch.context() as ctx:
         ctx.setenv("KUBECONFIG", str(kubeconfig.absolute()))
         with KopfRunner(["run", "--all-namespaces", "-m", "dask_operator"]) as runner:
@@ -74,7 +77,7 @@ def operator(kubeconfig):
     assert runner.exit_code == 0
 
 
-async def test_create(crd, operator, api: ApiClient):
+async def test_create(operator, api: ApiClient):
     custom = client.CustomObjectsApi(api)
     r = await custom.create_namespaced_custom_object(
         "dask.charmtx.com",
@@ -120,4 +123,4 @@ async def test_create(crd, operator, api: ApiClient):
         r["metadata"]["name"],
     )
 
-    assert matching_objects > 0
+    assert matching_objects == 1
