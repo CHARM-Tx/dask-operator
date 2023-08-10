@@ -1,7 +1,16 @@
 from copy import deepcopy
 import operator as op
 
+from kubernetes_asyncio.client import models
 from dask_operator import templates
+import pytest
+
+
+@pytest.mark.parametrize("cls", [models.V1EnvVar, dict])
+def test_get(cls):
+    objs = [cls(name="foo", value="bar"), cls(name="baz", value="qux")]
+
+    assert templates.get(objs, "foo") == cls(name="foo", value="bar")
 
 
 def test_merge():
@@ -51,3 +60,26 @@ def test_scheduler_service():
     )
 
     assert new_spec.selector == labels
+
+
+def test_worker_template():
+    scheduler = {
+        "metadata": {"name": "foo", "namespace": "bar"},
+        "spec": models.V1ServiceSpec(ports=[{"name": "tcp-comm", "port": 123}]),
+    }
+    template = {
+        "spec": {
+            "containers": [{"name": "worker", "image": "ghcr.io/dask/dask:latest"}]
+        }
+    }
+    labels = {"foo": "bar"}
+    new_template = templates.worker_template(template, labels, scheduler)
+
+    assert (
+        templates.get(
+            new_template["spec"]["containers"][0]["env"], "DASK_SCHEDULER_ADDRESS"
+        )["value"]
+        == f"tcp://foo.bar.svc.cluster.local:123"
+    )
+
+    assert new_template["metadata"]["labels"] == labels

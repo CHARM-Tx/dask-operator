@@ -12,8 +12,14 @@ type SchedulerSpec struct {
 	Service  v1.ServiceSpec     `json:"service,omitempty"`
 }
 
+type WorkerSpec struct {
+	Replicas int32              `json:"replicas,omitempty"`
+	Template v1.PodTemplateSpec `json:"template,omitempty"`
+}
+
 type ClusterSpec struct {
 	Scheduler SchedulerSpec `json:"scheduler,omitempty"`
+	Worker    WorkerSpec    `json:"worker,omitempty"`
 }
 
 type ClusterStatus struct {

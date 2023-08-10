@@ -77,7 +77,8 @@ async def operator(kubeconfig, crd):
     assert runner.exit_code == 0
 
 
-async def test_create(operator, api: ApiClient):
+@pytest.fixture(scope="session")
+async def dask_cluster(operator, api: ApiClient):
     custom = client.CustomObjectsApi(api)
     r = await custom.create_namespaced_custom_object(
         "dask.charmtx.com",
@@ -100,34 +101,25 @@ async def test_create(operator, api: ApiClient):
                             ]
                         }
                     }
-                }
+                },
+                "worker": {
+                    "replicas": 2,
+                    "template": {
+                        "spec": {
+                            "containers": [
+                                {
+                                    "name": "worker",
+                                    "image": "ghcr.io/dask/dask:latest",
+                                }
+                            ]
+                        }
+                    },
+                },
             },
         },
     )
 
-    v1 = client.CoreV1Api(api)
-    w = watch.Watch()
-    matching_pods = 0
-    async for event in w.stream(
-        v1.list_namespaced_pod,
-        namespace=r["metadata"]["namespace"],
-        label_selector="dask.charmtx.com/role=scheduler",
-        timeout_seconds=10,
-    ):
-        assert event["object"].metadata.name.startswith("test-")
-        matching_pods += 1
-        w.stop()
-
-    matching_services = 0
-    async for event in w.stream(
-        v1.list_namespaced_service,
-        namespace=r["metadata"]["namespace"],
-        label_selector="dask.charmtx.com/role=scheduler",
-        timeout_seconds=10,
-    ):
-        assert event["object"].metadata.name.startswith("test-")
-        matching_services += 1
-        w.stop()
+    yield r
 
     await custom.delete_namespaced_custom_object(
         "dask.charmtx.com",
@@ -137,5 +129,38 @@ async def test_create(operator, api: ApiClient):
         r["metadata"]["name"],
     )
 
-    assert matching_pods == 1
-    assert matching_services == 1
+
+@pytest.mark.parametrize(
+    ["type", "label_selector", "expected_count"],
+    [
+        ("service", "dask.charmtx.com/role=scheduler", 1),
+        ("pod", "dask.charmtx.com/role=scheduler", 1),
+        ("pod", "dask.charmtx.com/role=worker", 2),
+    ],
+)
+async def test_create_resources(
+    type, label_selector, expected_count, dask_cluster, api: ApiClient
+):
+    v1 = client.CoreV1Api(api)
+    list_fn = getattr(v1, f"list_namespaced_{type}")
+    w = watch.Watch()
+
+    cluster_name = dask_cluster["metadata"]["name"]
+    label_selector = ",".join(
+        [label_selector, f"dask.charmtx.com/cluster={cluster_name}"]
+    )
+
+    objects = set()
+    async for event in w.stream(
+        list_fn,
+        namespace=dask_cluster["metadata"]["namespace"],
+        label_selector=label_selector,
+        timeout_seconds=1,
+    ):
+        objects.add(event["object"].metadata.uid)
+        if len(objects) == expected_count:
+            break
+    else:
+        pytest.fail(
+            f"Resources not ready, expected {expected_count} got {len(objects)}."
+        )

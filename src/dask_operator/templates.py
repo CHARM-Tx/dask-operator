@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Union
 
 from kubernetes_asyncio import client
 
@@ -17,10 +17,17 @@ def merge(
     return list(by_key.values())
 
 
+def _get_merge_key(item: Union[object, dict[str, Any]], merge_key: str):
+    if hasattr(item, "openapi_types"):
+        return getattr(item, merge_key)
+    else:
+        return item[merge_key]
+
+
 def get(
-    items: list[dict[str, Any]], key: str, merge_key: str = "name"
+    items: list[object | dict[str, Any]], key: str, merge_key: str = "name"
 ) -> dict[str, Any]:
-    [item] = [i for i in items if i[merge_key] == key]
+    [item] = [i for i in items if key == _get_merge_key(i, merge_key)]
     return item
 
 
@@ -52,14 +59,28 @@ scheduler_service_ports = [
 ]
 
 
-def scheduler_template(template, labels) -> list[dict[str, Any]]:
+worker_container = {
+    "name": "worker",
+    "command": ["dask", "worker", "--name", "$(DASK_WORKER_NAME)"],
+}
+
+worker_env = [
+    {
+        "name": "DASK_WORKER_NAME",
+        "valueFrom": {"fieldRef": {"fieldPath": "metadata.name"}},
+    }
+]
+
+
+def scheduler_template(template, labels: dict[str, str]) -> list[dict[str, Any]]:
     metadata = template.get("metadata", {})
     labels = metadata.get("labels", {}) | labels
 
     containers = {c["name"]: c for c in template["spec"]["containers"]}
     containers["scheduler"] = scheduler_container | containers["scheduler"]
     containers["scheduler"]["ports"] = merge(
-        scheduler_template_ports, containers["scheduler"].get("ports", [])
+        containers["scheduler"].get("ports", []),
+        scheduler_template_ports,
     )
 
     return {
@@ -68,6 +89,36 @@ def scheduler_template(template, labels) -> list[dict[str, Any]]:
     }
 
 
-def scheduler_service(spec, labels) -> list[dict[str, Any]]:
+def scheduler_service(spec, labels: dict[str, str]) -> list[dict[str, Any]]:
     spec = spec | {"ports": merge(scheduler_service_ports, spec.get("ports", {}))}
     return client.V1ServiceSpec(**spec, selector=spec.get("selector", {}) | labels)
+
+
+def worker_template(
+    template, labels: dict[str, str], scheduler: Any
+) -> list[dict[str, Any]]:
+    metadata = template.get("metadata", {})
+    labels = metadata.get("labels", {}) | labels
+
+    scheduler_name = scheduler["metadata"]["name"]
+    scheduler_namespace = scheduler["metadata"]["namespace"]
+    scheduler_port = get(scheduler["spec"].ports, "tcp-comm")["port"]
+
+    containers = {c["name"]: c for c in template["spec"]["containers"]}
+    containers["worker"] = scheduler_container | containers["worker"]
+    containers["worker"]["env"] = merge(
+        containers["worker"].get("env", []),
+        [
+            *worker_env,
+            {
+                "name": "DASK_SCHEDULER_ADDRESS",
+                # FIXME: support cluster domains that aren't `.cluster.local`
+                "value": f"tcp://{scheduler_name}.{scheduler_namespace}.svc.cluster.local:{scheduler_port}",
+            },
+        ],
+    )
+
+    return {
+        "metadata": {**metadata, "labels": labels},
+        "spec": {**template["spec"], "containers": list(containers.values())},
+    }
