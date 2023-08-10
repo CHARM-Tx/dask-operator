@@ -30,11 +30,12 @@ async def logout(memo: kopf.Memo, **kwargs):
     await memo["api"].close()
 
 
-@kopf.on.create("charmtx.com", "daskclusters")
-async def create_cluster(memo, logger, **kwargs):
+@kopf.on.create("dask.charmtx.com", "clusters")
+async def create_cluster(spec, namespace, memo, logger, **kwargs):
     v1 = client.CoreV1Api(memo["api"])
     adoptee = {}
     kopf.adopt(adoptee)
+
     pod = client.V1Pod(
         spec=client.V1PodSpec(
             containers=[
@@ -48,4 +49,4 @@ async def create_cluster(memo, logger, **kwargs):
         ),
         **adoptee
     )
-    await v1.create_namespaced_pod(pod.metadata["namespace"], pod)
+    await v1.create_namespaced_pod(namespace=namespace, body=pod)

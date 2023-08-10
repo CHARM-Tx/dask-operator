@@ -44,11 +44,22 @@ async def api(kubeconfig):
 
 @pytest.fixture(scope="session")
 async def crd(api: ApiClient):
-    crd_file = Path(dask_operator.__file__).parent / "daskcluster.yaml"
-    crd = yaml.safe_load(crd_file.read_text())
-
     apiextensions = client.ApiextensionsV1Api(api)
+
+    crd_dir = Path(dask_operator.__file__).parent / "crd"
+    [crd_file] = crd_dir.iterdir()
+    crd = yaml.safe_load(crd_file.read_text())
     r = await apiextensions.create_custom_resource_definition(crd)
+
+    # Need to wait for the CRDs to actually be created/registered
+    w = watch.Watch()
+    async for event in w.stream(
+        apiextensions.list_custom_resource_definition, timeout_seconds=10
+    ):
+        assert event["object"].metadata.name == r.metadata.name
+        if event["object"].status.accepted_names == r.spec.names:
+            w.stop()
+
     yield r
     await apiextensions.delete_custom_resource_definition(r.metadata.name)
 
@@ -66,29 +77,47 @@ def operator(kubeconfig):
 async def test_create(crd, operator, api: ApiClient):
     custom = client.CustomObjectsApi(api)
     r = await custom.create_namespaced_custom_object(
-        "charmtx.com",
+        "dask.charmtx.com",
         "v1alpha1",
         "default",
-        "daskclusters",
+        "clusters",
         {
-            "apiVersion": "charmtx.com/v1alpha1",
-            "kind": "DaskCluster",
+            "apiVersion": "dask.charmtx.com/v1alpha1",
+            "kind": "Cluster",
             "metadata": {"generateName": "test-"},
-            "spec": {"image": "foo", "replicas": 1},
+            "spec": {
+                "scheduler": {
+                    "template": {
+                        "spec": {
+                            "containers": [
+                                {
+                                    "name": "scheduler",
+                                    "image": "ghcr.io/dask/dask:latest",
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
         },
     )
+
     v1 = client.CoreV1Api(api)
     w = watch.Watch()
+    matching_objects = 0
     async for event in w.stream(
         v1.list_namespaced_pod, namespace=r["metadata"]["namespace"], timeout_seconds=10
     ):
         assert event["object"].metadata.name.startswith("test-")
+        matching_objects += 1
         w.stop()
 
     await custom.delete_namespaced_custom_object(
-        "charmtx.com",
+        "dask.charmtx.com",
         "v1alpha1",
         r["metadata"]["namespace"],
-        "daskclusters",
+        "clusters",
         r["metadata"]["name"],
     )
+
+    assert matching_objects > 0
