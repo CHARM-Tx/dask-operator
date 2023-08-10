@@ -31,9 +31,8 @@ def get(
     return item
 
 
-scheduler_container = {
-    "name": "scheduler",
-    "command": ["dask", "scheduler"],
+http_port = 8787
+probes = {
     "readinessProbe": {
         "httpGet": {"port": "http-dashboard", "path": "/health"},
         "initialDelaySeconds": 5,
@@ -46,7 +45,9 @@ scheduler_container = {
     },
 }
 
-scheduler_ports = {"tcp-comm": 8786, "http-dashboard": 8787}
+scheduler_container = {"name": "scheduler", "command": ["dask", "scheduler"], **probes}
+
+scheduler_ports = {"tcp-comm": 8786, "http-dashboard": http_port}
 
 scheduler_template_ports = [
     {"name": name, "containerPort": port, "protocol": "TCP"}
@@ -61,7 +62,13 @@ scheduler_service_ports = [
 
 worker_container = {
     "name": "worker",
-    "command": ["dask", "worker", "--name", "$(DASK_WORKER_NAME)"],
+    "command": [
+        "dask",
+        "worker",
+        "--name=$(DASK_WORKER_NAME)",
+        f"--dashboard-address=$(DASK_WORKER_NAME):{http_port}",
+    ],
+    **probes,
 }
 
 worker_env = [
@@ -69,6 +76,10 @@ worker_env = [
         "name": "DASK_WORKER_NAME",
         "valueFrom": {"fieldRef": {"fieldPath": "metadata.name"}},
     }
+]
+
+worker_ports = [
+    {"name": "http-dashboard", "containerPort": http_port, "protocol": "TCP"}
 ]
 
 
@@ -103,19 +114,17 @@ def worker_template(
     scheduler_name = scheduler["metadata"]["name"]
     scheduler_namespace = scheduler["metadata"]["namespace"]
     scheduler_port = get(scheduler["spec"].ports, "tcp-comm")["port"]
+    # FIXME: support cluster domains that aren't `.cluster.local`
+    scheduler_address = f"tcp://{scheduler_name}.{scheduler_namespace}.svc.cluster.local:{scheduler_port}"
 
     containers = {c["name"]: c for c in template["spec"]["containers"]}
-    containers["worker"] = scheduler_container | containers["worker"]
+    containers["worker"] = worker_container | containers["worker"]
     containers["worker"]["env"] = merge(
         containers["worker"].get("env", []),
-        [
-            *worker_env,
-            {
-                "name": "DASK_SCHEDULER_ADDRESS",
-                # FIXME: support cluster domains that aren't `.cluster.local`
-                "value": f"tcp://{scheduler_name}.{scheduler_namespace}.svc.cluster.local:{scheduler_port}",
-            },
-        ],
+        [*worker_env, {"name": "DASK_SCHEDULER_ADDRESS", "value": scheduler_address}],
+    )
+    containers["worker"]["ports"] = merge(
+        containers["worker"].get("ports", []), worker_ports
     )
 
     return {
