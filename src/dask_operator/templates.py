@@ -24,7 +24,7 @@ def get(
 
 scheduler_container = {
     "name": "scheduler",
-    "command": ["dask-scheduler"],
+    "command": ["dask", "scheduler"],
     "readinessProbe": {
         "httpGet": {"port": "http-dashboard", "path": "/health"},
         "initialDelaySeconds": 5,

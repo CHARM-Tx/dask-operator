@@ -10,6 +10,8 @@ from kubernetes_asyncio.config import (
 from kubernetes_asyncio.client import Configuration, ApiClient
 from kubernetes_asyncio import client
 
+from . import templates
+
 
 @kopf.on.login()
 async def login(memo: kopf.Memo, **kwargs):
@@ -31,22 +33,30 @@ async def logout(memo: kopf.Memo, **kwargs):
 
 
 @kopf.on.create("dask.charmtx.com", "clusters")
-async def create_cluster(spec, namespace, memo, logger, **kwargs):
-    v1 = client.CoreV1Api(memo["api"])
-    adoptee = {}
-    kopf.adopt(adoptee)
+async def create_cluster(
+    name: str, namespace: str, spec: kopf.Spec, memo: kopf.Memo, **kwargs
+):
+    appsv1 = client.AppsV1Api(memo["api"])
+    labels = {
+        "dask.charmtx.com/cluster-name": name,
+    }
 
-    pod = client.V1Pod(
-        spec=client.V1PodSpec(
-            containers=[
-                client.V1Container(
-                    name="ubuntu",
-                    image="ubuntu:22.04",
-                    command=["bash", "-c"],
-                    args=["trap : TERM INT; sleep infinity & wait"],
-                )
-            ]
-        ),
-        **adoptee
+    scheduler_labels = {**labels, "dask.charmtx.com/role": "scheduler"}
+    scheduler_template = spec["scheduler"]["template"]
+    scheduler_template["spec"]["containers"] = templates.scheduler_containers(
+        scheduler_template["spec"]["containers"]
     )
-    await v1.create_namespaced_pod(namespace=namespace, body=pod)
+    scheduler_template.setdefault("metadata", {}).setdefault("labels", {})
+    scheduler_template["metadata"]["labels"] |= scheduler_labels
+
+    scheduler = {
+        "metadata": {"generateName": f"{name}-", "labels": scheduler_labels},
+        "spec": client.V1ReplicaSetSpec(
+            replicas=1,
+            selector={"matchLabels": scheduler_labels},
+            template=scheduler_template,
+        ),
+    }
+
+    kopf.adopt(scheduler)
+    await appsv1.create_namespaced_replica_set(namespace=namespace, body=scheduler)
