@@ -48,6 +48,13 @@ probes = {
 scheduler_container = {"name": "scheduler", "command": ["dask", "scheduler"], **probes}
 
 scheduler_ports = {"tcp-comm": 8786, "http-dashboard": http_port}
+scheduler_env = [
+    # The scheduler API is disabled by default, see https://github.com/dask/distributed/issues/6407
+    {
+        "name": "DASK_DISTRIBUTED__SCHEDULER__HTTP__ROUTES",
+        "value": "['distributed.http.scheduler.api','distributed.http.health']",
+    }
+]
 
 scheduler_template_ports = [
     {"name": name, "containerPort": port, "protocol": "TCP"}
@@ -66,6 +73,7 @@ worker_container = {
         "dask",
         "worker",
         "--name=$(DASK_WORKER_NAME)",
+        "--no-nanny",
         f"--dashboard-address=$(DASK_WORKER_NAME):{http_port}",
     ],
     **probes,
@@ -89,6 +97,9 @@ def scheduler_template(template, labels: dict[str, str]) -> list[dict[str, Any]]
 
     containers = {c["name"]: c for c in template["spec"]["containers"]}
     containers["scheduler"] = scheduler_container | containers["scheduler"]
+    containers["scheduler"]["env"] = merge(
+        containers["scheduler"].get("env", []), [*scheduler_env]
+    )
     containers["scheduler"]["ports"] = merge(
         containers["scheduler"].get("ports", []),
         scheduler_template_ports,
@@ -114,8 +125,9 @@ def worker_template(
     scheduler_name = scheduler["metadata"]["name"]
     scheduler_namespace = scheduler["metadata"]["namespace"]
     scheduler_port = get(scheduler["spec"].ports, "tcp-comm")["port"]
-    # FIXME: support cluster domains that aren't `.cluster.local`
-    scheduler_address = f"tcp://{scheduler_name}.{scheduler_namespace}.svc.cluster.local:{scheduler_port}"
+    scheduler_address = (
+        f"tcp://{scheduler_name}.{scheduler_namespace}.svc:{scheduler_port}"
+    )
 
     containers = {c["name"]: c for c in template["spec"]["containers"]}
     containers["worker"] = worker_container | containers["worker"]

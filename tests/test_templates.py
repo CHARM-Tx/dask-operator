@@ -79,7 +79,7 @@ def test_worker_template():
         templates.get(
             new_template["spec"]["containers"][0]["env"], "DASK_SCHEDULER_ADDRESS"
         )["value"]
-        == f"tcp://foo.bar.svc.cluster.local:123"
+        == f"tcp://foo.bar.svc:123"
     )
 
     assert new_template["metadata"]["labels"] == labels
