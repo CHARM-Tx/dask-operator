@@ -13,8 +13,10 @@ type SchedulerSpec struct {
 }
 
 type WorkerSpec struct {
-	Replicas int32              `json:"replicas,omitempty"`
-	Template v1.PodTemplateSpec `json:"template,omitempty"`
+	Replicas    int32              `json:"replicas,omitempty"`
+	MinReplicas int32              `json:"minReplicas,omitempty"`
+	MaxReplicas int32              `json:"maxReplicas,omitempty"`
+	Template    v1.PodTemplateSpec `json:"template,omitempty"`
 }
 
 type ClusterSpec struct {
@@ -25,9 +27,6 @@ type ClusterSpec struct {
 type ClusterStatus struct {
 }
 
-//+kubebuilder:object:root=true
-//+kubebuilder:subresource:status
-
 type Cluster struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -35,5 +34,3 @@ type Cluster struct {
 	Spec   ClusterSpec   `json:"spec,omitempty"`
 	Status ClusterStatus `json:"status,omitempty"`
 }
-
-//+kubebuilder:object:root=true

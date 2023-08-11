@@ -62,25 +62,24 @@ async def create_cluster(
     }
     kopf.adopt(scheduler_service)
 
-    worker_labels = {**labels, "dask.charmtx.com/role": "worker"}
-    worker_replicaset = {
-        "metadata": {"name": f"{name}-worker", "labels": worker_labels},
-        "spec": client.V1ReplicaSetSpec(
-            replicas=spec["worker"].get("replicas", 0),
-            selector={"matchLabels": worker_labels},
-            template=templates.worker_template(
-                spec["worker"]["template"], worker_labels, scheduler_service
-            ),
-        ),
-    }
-    kopf.adopt(worker_replicaset)
-
     await asyncio.gather(
         appsv1.create_namespaced_replica_set(
             namespace=namespace, body=scheduler_replicaset
         ),
-        appsv1.create_namespaced_replica_set(
-            namespace=namespace, body=worker_replicaset
-        ),
         v1.create_namespaced_service(namespace=namespace, body=scheduler_service),
+    )
+
+    worker_metadata = {
+        "generateName": f"{name}-worker",
+        "labels": {**labels, "dask.charmtx.com/role": "worker"},
+    }
+    worker_template = templates.worker_template(
+        spec["worker"]["template"], worker_metadata, scheduler_service
+    )
+    kopf.adopt(worker_template)
+    await asyncio.gather(
+        *(
+            v1.create_namespaced_pod(namespace, worker_template)
+            for _ in range(spec["worker"]["replicas"])
+        )
     )

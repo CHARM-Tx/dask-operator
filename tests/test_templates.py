@@ -72,8 +72,8 @@ def test_worker_template():
             "containers": [{"name": "worker", "image": "ghcr.io/dask/dask:latest"}]
         }
     }
-    labels = {"foo": "bar"}
-    new_template = templates.worker_template(template, labels, scheduler)
+    metadata = {"labels": {"foo": "bar"}}
+    new_template = templates.worker_template(template, metadata, scheduler)
 
     assert (
         templates.get(
@@ -82,4 +82,4 @@ def test_worker_template():
         == f"tcp://foo.bar.svc:123"
     )
 
-    assert new_template["metadata"]["labels"] == labels
+    assert new_template["metadata"]["labels"] == metadata["labels"]

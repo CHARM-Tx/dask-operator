@@ -31,6 +31,8 @@ async def dask_cluster(operator, api: ApiClient):
                 },
                 "worker": {
                     "replicas": 2,
+                    "minReplicas": 2,
+                    "maxReplicas": 2,
                     "template": {
                         "spec": {
                             "containers": [
@@ -58,15 +60,15 @@ async def dask_cluster(operator, api: ApiClient):
 
 
 @pytest.mark.parametrize(
-    ["type", "label_selector", "expected_count"],
+    ["type", "role", "expected_count"],
     [
-        ("service", "dask.charmtx.com/role=scheduler", 1),
-        ("pod", "dask.charmtx.com/role=scheduler", 1),
-        ("pod", "dask.charmtx.com/role=worker", 2),
+        ("service", "scheduler", 1),
+        ("pod", "scheduler", 1),
+        ("pod", "worker", 2),
     ],
 )
 async def test_create_resources(
-    type, label_selector, expected_count, dask_cluster, api: ApiClient
+    type, role, expected_count, dask_cluster, api: ApiClient
 ):
     v1 = client.CoreV1Api(api)
     list_fn = getattr(v1, f"list_namespaced_{type}")
@@ -74,7 +76,7 @@ async def test_create_resources(
 
     cluster_name = dask_cluster["metadata"]["name"]
     label_selector = ",".join(
-        [label_selector, f"dask.charmtx.com/cluster={cluster_name}"]
+        [f"dask.charmtx.com/role={role}", f"dask.charmtx.com/cluster={cluster_name}"]
     )
 
     objects = set()

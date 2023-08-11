@@ -47,6 +47,8 @@ async def dask_cluster(operator, api: ApiClient):
                 },
                 "worker": {
                     "replicas": 2,
+                    "minReplicas": 2,
+                    "maxReplicas": 2,
                     "template": {
                         "spec": {
                             "containers": [

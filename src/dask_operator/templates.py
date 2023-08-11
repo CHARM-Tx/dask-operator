@@ -117,10 +117,10 @@ def scheduler_service(spec, labels: dict[str, str]) -> list[dict[str, Any]]:
 
 
 def worker_template(
-    template, labels: dict[str, str], scheduler: Any
+    template, metadata: dict[str, Any], scheduler: Any
 ) -> list[dict[str, Any]]:
-    metadata = template.get("metadata", {})
-    labels = metadata.get("labels", {}) | labels
+    template_metadata = template.get("metadata", {})
+    labels = template_metadata.get("labels", {}) | metadata["labels"]
 
     scheduler_name = scheduler["metadata"]["name"]
     scheduler_namespace = scheduler["metadata"]["namespace"]
@@ -140,6 +140,10 @@ def worker_template(
     )
 
     return {
-        "metadata": {**metadata, "labels": labels},
-        "spec": {**template["spec"], "containers": list(containers.values())},
+        "metadata": {**metadata, **template_metadata, "labels": labels},
+        "spec": {
+            "restartPolicy": "OnFailure",
+            **template["spec"],
+            "containers": list(containers.values()),
+        },
     }
