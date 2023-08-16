@@ -63,17 +63,14 @@ def test_scheduler_service():
 
 
 def test_worker_template():
-    scheduler = {
-        "metadata": {"name": "foo", "namespace": "bar"},
-        "spec": models.V1ServiceSpec(ports=[{"name": "tcp-comm", "port": 123}]),
-    }
+    scheduler_address = "tcp://foo.bar.svc:123"
     template = {
         "spec": {
             "containers": [{"name": "worker", "image": "ghcr.io/dask/dask:latest"}]
         }
     }
     metadata = {"labels": {"foo": "bar"}}
-    new_template = templates.worker_template(template, metadata, scheduler)
+    new_template = templates.worker_template(template, metadata, scheduler_address)
 
     assert (
         templates.get(

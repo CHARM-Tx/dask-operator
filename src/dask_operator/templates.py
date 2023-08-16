@@ -117,17 +117,10 @@ def scheduler_service(spec, labels: dict[str, str]) -> list[dict[str, Any]]:
 
 
 def worker_template(
-    template, metadata: dict[str, Any], scheduler: Any
+    template, metadata: dict[str, Any], scheduler_address: str
 ) -> list[dict[str, Any]]:
     template_metadata = template.get("metadata", {})
     labels = template_metadata.get("labels", {}) | metadata["labels"]
-
-    scheduler_name = scheduler["metadata"]["name"]
-    scheduler_namespace = scheduler["metadata"]["namespace"]
-    scheduler_port = get(scheduler["spec"].ports, "tcp-comm")["port"]
-    scheduler_address = (
-        f"tcp://{scheduler_name}.{scheduler_namespace}.svc:{scheduler_port}"
-    )
 
     containers = {c["name"]: c for c in template["spec"]["containers"]}
     containers["worker"] = worker_container | containers["worker"]

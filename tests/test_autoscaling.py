@@ -4,8 +4,35 @@ import aiohttp
 from yarl import URL
 
 from dask_operator import autoscaling
-from kubernetes_asyncio import client
+from kubernetes_asyncio import client, watch
 from kubernetes_asyncio.client import ApiClient
+
+
+async def wait_for_scheduler(autoscaler):
+    await autoscaler._wait_for_pods({"dask.charmtx.com/role": "scheduler"})
+    while True:
+        try:
+            await autoscaler.is_ready()
+        except (
+            aiohttp.ClientOSError,
+            aiohttp.ClientResponseError,
+            aiohttp.ServerConnectionError,
+        ):
+            await asyncio.sleep(0.1)
+        else:
+            break
+
+
+async def wait_for_workers(autoscaler, n: int):
+    await autoscaler._wait_for_pods({"dask.charmtx.com/role": "worker"}, n=n)
+    while True:
+        workers = await autoscaler.get_workers()
+        if len(workers) < n:
+            await asyncio.sleep(1)
+        elif len(workers) == n:
+            break
+        else:
+            raise ValueError(f"Got too many pods: {n}")
 
 
 @pytest.fixture(scope="session")
@@ -47,7 +74,7 @@ async def dask_cluster(operator, api: ApiClient):
                 },
                 "worker": {
                     "replicas": 2,
-                    "minReplicas": 2,
+                    "minReplicas": 1,
                     "maxReplicas": 2,
                     "template": {
                         "spec": {
@@ -88,10 +115,11 @@ async def autoscaler(http, dask_cluster, monkeypatch, api: ApiClient):
     )
     # Not the real service details, but this causes the URL to be correct
     scheduler = autoscaling.Cluster.from_metadata(dask_cluster["metadata"])
-    autoscaler = autoscaling.Autoscaler(http, api, scheduler)
-    # Scheduler can take quite some time to come up
-    await asyncio.wait_for(autoscaler.wait_ready(), timeout=30)
-    await asyncio.wait_for(autoscaler.wait_for_workers(2), timeout=30)
+    autoscaler = autoscaling.Scheduler(http, api, scheduler)
+
+    # Scheduler can take quite some time to come up after pods exist
+    await asyncio.wait_for(wait_for_scheduler(autoscaler), timeout=30)
+    await asyncio.wait_for(wait_for_workers(autoscaler, n=2), timeout=30)
     yield autoscaler
 
 
@@ -103,8 +131,28 @@ async def test_get_workers(autoscaler):
     assert len(await autoscaler.get_workers()) == 2
 
 
-async def test_retire_workers(autoscaler):
-    retired = await autoscaler.retire_workers(1)
-    # FIXME: There is no non-racy way to scale down workers with replicasets.
-    # Retiring the worker causes the process to gracefully exit, at which point
-    # the replicaset restarts it, and it re-registers as a new worker.
+async def test_retire_workers(dask_cluster, autoscaler, api):
+    v1 = client.CoreV1Api(api)
+    w = watch.Watch()
+    worker_labels = {
+        "dask.charmtx.com/cluster": dask_cluster["metadata"]["name"],
+        "dask.charmtx.com/role": "worker",
+    }
+    label_selector = ",".join(map("=".join, worker_labels.items()))
+    stream = w.stream(
+        v1.list_namespaced_pod,
+        namespace=dask_cluster["metadata"]["namespace"],
+        label_selector=label_selector,
+        timeout_seconds=30,
+    )
+
+    retired = set(await autoscaler.retire_workers(1))
+    assert len(retired) == 1
+    async for event in stream:
+        pod_name = event["object"].metadata.name
+        if event["type"] == "DELETED" and pod_name in retired:
+            retired.remove(pod_name)
+        if len(retired) == 0:
+            break
+    else:
+        pytest.fail(f"Pods not deleted: {retired}")

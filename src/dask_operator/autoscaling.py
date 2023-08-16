@@ -1,5 +1,4 @@
-import asyncio
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 import aiohttp
 
 import kopf
@@ -22,13 +21,17 @@ class Cluster(NamedTuple):
         return yarl.URL.build(host=host, port=self.port)
 
 
-class Autoscaler:
+class Scheduler:
     def __init__(
         self, http: aiohttp.ClientSession, api: client.ApiClient, cluster: Cluster
     ):
         self.http = http
         self.api = api
         self.cluster = cluster
+
+    async def is_ready(self):
+        url = self.cluster.scheduler_url.with_path("/health")
+        return await self.http.get(url)
 
     async def get_desired_workers(self):
         url = self.cluster.scheduler_url.with_path("/api/v1/adaptive_target")
@@ -44,13 +47,15 @@ class Autoscaler:
             return
 
         # Takes `n` with a number of workers, or `workers` with a list of worker
-        params = {"n": 0}
+        # names. Note: number of workers actually retired may be <= n.
+        params = {"n": n}
         workers = await (await self.http.post(url, json=params)).json()
-        return [worker["name"] for worker in workers]
+        return [worker["id"] for worker in workers.values()]
 
     async def _wait_for_pods(self, labels: dict[str, str], n: int = 1):
         v1 = client.CoreV1Api(self.api)
         w = watch.Watch()
+        labels = {"dask.charmtx.com/cluster": self.cluster.name, **labels}
         label_selector = ",".join("=".join([k, v]) for k, v in labels.items())
 
         objects = set()
@@ -66,43 +71,54 @@ class Autoscaler:
             if len(objects) >= n:
                 return
 
-    async def wait_for_workers(self, n: int):
-        await self._wait_for_pods(
-            {
-                "dask.charmtx.com/cluster": self.cluster.name,
-                "dask.charmtx.com/role": "worker",
-            }
-        )
-        while len(await self.get_workers()) < n:
-            asyncio.sleep(1)
-
     async def wait_ready(self):
-        await self._wait_for_pods(
-            {
-                "dask.charmtx.com/cluster": self.cluster.name,
-                "dask.charmtx.com/role": "scheduler",
-            }
-        )
-
-        # Sometimes the service is not quite ready to serve despite the
-        # scheduler being ready, so double check and wait.
-        while True:
-            try:
-                await self.http.get(self.cluster.scheduler_url.with_path("/health"))
-            except (aiohttp.ClientResponseError, aiohttp.ServerConnectionError):
-                asyncio.sleep(1)
-            else:
-                break
+        await self._wait_for_pods({"dask.charmtx.com/role": "scheduler"})
 
 
-@kopf.daemon("dask.charmtx.com", "clusters", cancellation_timeout=1.0)
-async def autoscaler(
-    name: str, namespace: str, memo: kopf.Memo, stopped: kopf.DaemonStopped, **kwargs
+@kopf.on.startup()
+async def http(memo: kopf.Memo, **kwargs):
+    memo["http"] = aiohttp.ClientSession(raise_for_status=True)
+
+
+@kopf.on.cleanup()
+async def http_close(memo: kopf.Memo, **kwargs):
+    await memo["http"].close()
+
+
+def clamp(i, lower, upper):
+    return min(max(i, lower), upper)
+
+
+@kopf.timer("dask.charmtx.com", "clusters", interval=5.0, idle=5.0)
+async def update_autoscaler(
+    name: str,
+    namespace: str,
+    memo: kopf.Memo,
+    spec: kopf.Spec,
+    **kwargs,
 ):
-    v1 = client.CoreV1Api(memo["api"])
+    custom = client.CustomObjectsApi(memo["api"])
     scheduler = Cluster(name=name, namespace=namespace)
+    scheduler = Scheduler(memo["http"], memo["api"], scheduler)
+    try:
+        await scheduler.is_ready()
+    except aiohttp.ClientError:
+        await scheduler.wait_ready()
+        return kopf.TemporaryError(delay=1.0)
 
-    async with aiohttp.ClientSession(raise_for_status=True) as http:
-        autoscaler = Autoscaler(http, memo["api"], scheduler)
-        while not stopped:
-            await stopped.wait(5)  # Rate limiting
+    desired = await scheduler.get_desired_workers()
+    desired = clamp(
+        desired, spec["worker"]["maxReplicas"], spec["worker"]["minReplicas"]
+    )
+
+    await custom.patch_namespaced_custom_object(
+        "dask.charmtx.com",
+        "v1alpha1",
+        namespace,
+        "clusters",
+        name,
+        {"spec": {"worker": {"replicas": desired}}},
+    )
+    # Race condition: must patch replicas _before_ retiring workers, so the
+    # retired workers are not recreated if they exit quickly.
+    await scheduler.retire_workers(max(spec["worker"]["replicas"] - desired, 0))

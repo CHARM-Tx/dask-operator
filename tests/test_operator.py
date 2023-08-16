@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 from kubernetes_asyncio import client, watch
 from kubernetes_asyncio.client import ApiClient
@@ -84,12 +85,59 @@ async def test_create_resources(
         list_fn,
         namespace=dask_cluster["metadata"]["namespace"],
         label_selector=label_selector,
-        timeout_seconds=1,
+        timeout_seconds=5,
     ):
-        objects.add(event["object"].metadata.uid)
+        objects.add(event["object"].metadata.name)
         if len(objects) == expected_count:
             break
     else:
         pytest.fail(
             f"Resources not ready, expected {expected_count} got {len(objects)}."
         )
+
+
+async def test_recreate_worker(dask_cluster, api: ApiClient):
+    v1 = client.CoreV1Api(api)
+
+    namespace = dask_cluster["metadata"]["namespace"]
+    cluster_name = dask_cluster["metadata"]["name"]
+    label_selector = ",".join(
+        [f"dask.charmtx.com/role=worker", f"dask.charmtx.com/cluster={cluster_name}"]
+    )
+
+    pods = set()
+    async for event in watch.Watch().stream(
+        v1.list_namespaced_pod,
+        namespace=namespace,
+        label_selector=label_selector,
+        timeout_seconds=5,
+    ):
+        pods.add(event["object"].metadata.name)
+        if len(pods) == 2:
+            break
+
+    deleted_pod = (
+        await v1.delete_namespaced_pod(next(iter(pods)), namespace)
+    ).metadata.name
+    async for event in watch.Watch().stream(
+        v1.list_namespaced_pod,
+        namespace=namespace,
+        label_selector=label_selector,
+        timeout_seconds=120,
+    ):
+        if event["type"] == "DELETED" and event["object"].metadata.name == deleted_pod:
+            break
+    else:
+        pytest.fail(f"Pod {deleted_pod} was not deleted.")
+
+    async for event in watch.Watch().stream(
+        v1.list_namespaced_pod,
+        namespace=namespace,
+        label_selector=label_selector,
+        timeout_seconds=5,
+    ):
+        pods.add(event["object"].metadata.name)
+        if len(pods) == 3:
+            break
+    else:
+        pytest.fail(f"No replacement pod created.")

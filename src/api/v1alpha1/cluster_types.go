@@ -24,9 +24,20 @@ type ClusterSpec struct {
 	Worker    WorkerSpec    `json:"worker,omitempty"`
 }
 
-type ClusterStatus struct {
+type SchedulerStatus struct {
+	Address string `json:"address,omitempty"`
 }
 
+type WorkerStatus struct {
+	Count int32 `json:"count,omitempty"`
+}
+
+type ClusterStatus struct {
+	Scheduler SchedulerStatus `json:"scheduler,omitempty"`
+	Workers   WorkerStatus    `json:"workers,omitempty"`
+}
+
+// +kubebuilder:subresource:status
 type Cluster struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
