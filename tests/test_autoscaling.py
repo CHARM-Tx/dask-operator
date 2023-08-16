@@ -118,8 +118,8 @@ async def autoscaler(http, dask_cluster, monkeypatch, api: ApiClient):
     autoscaler = autoscaling.Scheduler(http, api, scheduler)
 
     # Scheduler can take quite some time to come up after pods exist
-    await asyncio.wait_for(wait_for_scheduler(autoscaler), timeout=30)
-    await asyncio.wait_for(wait_for_workers(autoscaler, n=2), timeout=30)
+    await asyncio.wait_for(wait_for_scheduler(autoscaler), timeout=60)
+    await asyncio.wait_for(wait_for_workers(autoscaler, n=2), timeout=60)
     yield autoscaler
 
 

@@ -1,0 +1,31 @@
+name: Test
+on:
+  pull_request: ~
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Create kind cluster
+        run: kind create cluster --config ./kind.yaml --kubeconfig ./kubeconfig
+      - uses: docker/setup-buildx-action@v2
+      - uses: docker/build-push-action@v3
+        with:
+          context: .
+          target: dev
+          load: true
+          tags: dask-operator
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: pre-load dask image
+        run: |
+          docker pull ghcr.io/dask/dask:latest
+          kind load docker-image ghcr.io/dask/dask:latest
+      # --network=host is required on GitHub actions, but not locally
+      - name: run unit tests
+        run: |
+          docker run --rm \
+            -v $(pwd)/kubeconfig:/app/kubeconfig \
+            --network host --add-host host.docker.internal:127.0.0.1 \
+            dask-operator pytest -v ./tests
