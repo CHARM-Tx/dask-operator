@@ -76,8 +76,9 @@ async def scheduler(
 
 
 @kopf.index("pods", labels={"dask.charmtx.com/role": "worker"})
-async def worker_pods(namespace: str, name: str, labels: kopf.Labels, **kwargs):
+async def worker_pods(namespace: str, name: str, labels: kopf.Labels, logger: kopf.Logger, **kwargs):
     cluster_name = labels["dask.charmtx.com/cluster"]
+    logger.info(f"Adding pod {name} to cluster {namespace}/{name}")
     return {(namespace, cluster_name): name}
 
 
@@ -111,6 +112,7 @@ async def delete_worker(
     labels: kopf.Labels,
     memo: kopf.Memo,
     worker_pods: kopf.Index,
+    logger: kopf.Logger,
     **kwargs,
 ):
     custom = client.CustomObjectsApi(memo["api"])
@@ -118,6 +120,7 @@ async def delete_worker(
     cluster = labels["dask.charmtx.com/cluster"]
     existing_workers = worker_pods.get((namespace, cluster), [])
 
+    logger.info(f"Found {existing_workers} workers for cluster {cluster} after pod deletion")
     # There is technically a race condition here, as both the cluster handler
     # and pod handler write to this condition. But both update the field with
     # the length of `worker_pods`, so it will eventually stabilize.
@@ -142,6 +145,7 @@ async def workers(
     status: kopf.Status,
     memo: kopf.Memo,
     worker_pods: kopf.Index,
+    logger: kopf.Logger,
     **kwargs,
 ):
     v1 = client.CoreV1Api(memo["api"])
@@ -150,15 +154,17 @@ async def workers(
         "dask.charmtx.com/cluster": name,
         "dask.charmtx.com/role": "worker",
     }
-    worker_metadata = {"generateName": f"{name}-worker-", "labels": labels}
     if not status.get("scheduler"):
         raise kopf.TemporaryError(
             f"Scheduler not created yet for {namespace}/{name}", delay=1
         )
 
     existing_workers = len(worker_pods.get((namespace, name), []))
+    logger.info(f"Found {existing_workers} workers for cluster {namespace}/{name}")
     required_workers = max(spec["worker"]["replicas"] - existing_workers, 0)
+    logger.info(f"Creating {required_workers} workers for cluster {namespace}/{name}")
 
+    worker_metadata = {"generateName": f"{name}-worker-", "labels": labels}
     worker_template = templates.worker_template(
         spec["worker"]["template"], worker_metadata, status["scheduler"]["address"]
     )
