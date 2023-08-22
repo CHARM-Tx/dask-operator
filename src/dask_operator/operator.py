@@ -75,6 +75,12 @@ async def scheduler(
     return {"address": address}
 
 
+@kopf.index("dask.charmtx.com", "clusters")
+async def cluster_queues(namespace: str, name: str, logger: kopf.Logger, **kwargs):
+    logger.info(f"Creating new queue for cluster")
+    return {(namespace, name): set()}
+
+
 @kopf.index("pods", labels={"dask.charmtx.com/role": "worker"})
 async def worker_pods(
     namespace: str, name: str, labels: kopf.Labels, logger: kopf.Logger, **kwargs
@@ -100,6 +106,14 @@ def is_deletion_event(event: kopf.RawEvent, **kwargs):
     return event["type"] == "DELETED"
 
 
+@kopf.on.create(
+    "v1",
+    "pods",
+    labels={
+        "dask.charmtx.com/role": "worker",
+        "dask.charmtx.com/cluster": kopf.PRESENT,
+    },
+)
 @kopf.on.event(
     "v1",
     "pods",
@@ -110,10 +124,12 @@ def is_deletion_event(event: kopf.RawEvent, **kwargs):
     when=is_deletion_event,
 )
 async def delete_worker(
+    name: str,
     namespace: str,
     labels: kopf.Labels,
     memo: kopf.Memo,
     worker_pods: kopf.Index,
+    cluster_queues: kopf.Index,
     logger: kopf.Logger,
     **kwargs,
 ):
@@ -121,6 +137,9 @@ async def delete_worker(
 
     cluster = labels["dask.charmtx.com/cluster"]
     existing_workers = len(worker_pods.get((namespace, cluster), []))
+
+    [pod_queue] = cluster_queues[namespace, cluster]
+    pod_queue.discard(name)
 
     logger.info(f"Found {existing_workers} pods for {namespace}/{cluster}")
     # There is technically a race condition here, as both the cluster handler
@@ -147,6 +166,7 @@ async def workers(
     status: kopf.Status,
     memo: kopf.Memo,
     worker_pods: kopf.Index,
+    cluster_queues: kopf.Index,
     logger: kopf.Logger,
     **kwargs,
 ):
@@ -161,6 +181,10 @@ async def workers(
             f"Scheduler not created yet for {namespace}/{name}", delay=1
         )
 
+    [pod_queue] = cluster_queues[namespace, name]
+    if pod_queue:
+        raise kopf.TemporaryError(f"Created pods not yet processed", delay=1)
+
     existing_workers = len(worker_pods.get((namespace, name), []))
     logger.info(f"Found {existing_workers} workers")
     required_workers = max(spec["worker"]["replicas"] - existing_workers, 0)
@@ -171,10 +195,11 @@ async def workers(
         spec["worker"]["template"], worker_metadata, status["scheduler"]["address"]
     )
     kopf.adopt(worker_template)
-    await asyncio.gather(
+    pods = await asyncio.gather(
         *(
             v1.create_namespaced_pod(namespace, worker_template)
             for _ in range(required_workers)
         )
     )
-    return {"count": existing_workers + required_workers}
+    pod_names = {p.metadata.name for p in pods}
+    pod_queue.update(pod_names)
