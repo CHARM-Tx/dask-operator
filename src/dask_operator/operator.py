@@ -76,9 +76,11 @@ async def scheduler(
 
 
 @kopf.index("pods", labels={"dask.charmtx.com/role": "worker"})
-async def worker_pods(namespace: str, name: str, labels: kopf.Labels, logger: kopf.Logger, **kwargs):
+async def worker_pods(
+    namespace: str, name: str, labels: kopf.Labels, logger: kopf.Logger, **kwargs
+):
     cluster_name = labels["dask.charmtx.com/cluster"]
-    logger.info(f"Adding pod {name} to cluster {namespace}/{name}")
+    logger.info(f"Adding pod to cluster {namespace}/{name}")
     return {(namespace, cluster_name): name}
 
 
@@ -118,9 +120,9 @@ async def delete_worker(
     custom = client.CustomObjectsApi(memo["api"])
 
     cluster = labels["dask.charmtx.com/cluster"]
-    existing_workers = worker_pods.get((namespace, cluster), [])
+    existing_workers = len(worker_pods.get((namespace, cluster), []))
 
-    logger.info(f"Found {existing_workers} workers for cluster {cluster} after pod deletion")
+    logger.info(f"Found {existing_workers} pods for {namespace}/{cluster}")
     # There is technically a race condition here, as both the cluster handler
     # and pod handler write to this condition. But both update the field with
     # the length of `worker_pods`, so it will eventually stabilize.
@@ -130,7 +132,7 @@ async def delete_worker(
         namespace,
         "clusters",
         cluster,
-        {"status": {"workers": {"count": len(existing_workers)}}},
+        {"status": {"workers": {"count": existing_workers}}},
         _content_type="application/merge-patch+json",
     )
 
@@ -160,9 +162,9 @@ async def workers(
         )
 
     existing_workers = len(worker_pods.get((namespace, name), []))
-    logger.info(f"Found {existing_workers} workers for cluster {namespace}/{name}")
+    logger.info(f"Found {existing_workers} workers")
     required_workers = max(spec["worker"]["replicas"] - existing_workers, 0)
-    logger.info(f"Creating {required_workers} workers for cluster {namespace}/{name}")
+    logger.info(f"Creating {required_workers} workers")
 
     worker_metadata = {"generateName": f"{name}-worker-", "labels": labels}
     worker_template = templates.worker_template(
