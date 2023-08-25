@@ -76,9 +76,12 @@ async def scheduler(
 
 
 @kopf.index("dask.charmtx.com", "clusters")
-async def cluster_queues(namespace: str, name: str, logger: kopf.Logger, **kwargs):
-    logger.info(f"Creating new queue for cluster")
-    return {(namespace, name): set()}
+async def cluster_queues(
+    namespace: str, name: str, logger: kopf.Logger, cluster_queues: kopf.Index, **kwargs
+):
+    if (namespace, name) not in cluster_queues:
+        logger.info(f"Creating new queue for cluster")
+        return {(namespace, name): (set(), asyncio.Lock())}
 
 
 @kopf.index("pods", labels={"dask.charmtx.com/role": "worker"})
@@ -138,10 +141,11 @@ async def delete_worker(
     cluster = labels["dask.charmtx.com/cluster"]
     existing_workers = len(worker_pods.get((namespace, cluster), []))
 
-    [pod_queue] = cluster_queues[namespace, cluster]
-    pod_queue.discard(name)
+    [(pod_queue, queue_lock)] = cluster_queues[namespace, cluster]
+    async with queue_lock:
+        pod_queue.discard(name)
 
-    logger.info(f"Found {existing_workers} pods for {namespace}/{cluster}")
+    logger.info(f"Found {existing_workers} pods for {namespace}/{cluster} ({name})")
     # There is technically a race condition here, as both the cluster handler
     # and pod handler write to this condition. But both update the field with
     # the length of `worker_pods`, so it will eventually stabilize.
@@ -165,7 +169,6 @@ async def workers(
     spec: kopf.Spec,
     status: kopf.Status,
     memo: kopf.Memo,
-    worker_pods: kopf.Index,
     cluster_queues: kopf.Index,
     logger: kopf.Logger,
     **kwargs,
@@ -181,11 +184,13 @@ async def workers(
             f"Scheduler not created yet for {namespace}/{name}", delay=1
         )
 
-    [pod_queue] = cluster_queues[namespace, name]
+    [(pod_queue, queue_lock)] = cluster_queues[namespace, name]
     if pod_queue:
-        raise kopf.TemporaryError(f"Created pods not yet processed", delay=1)
+        raise kopf.TemporaryError(
+            f"Created pods not yet processed: {', '.join(pod_queue)}", delay=1
+        )
 
-    existing_workers = len(worker_pods.get((namespace, name), []))
+    existing_workers = status.get("workers", {}).get("count", 0)
     logger.info(f"Found {existing_workers} workers")
     required_workers = max(spec["worker"]["replicas"] - existing_workers, 0)
     logger.info(f"Creating {required_workers} workers")
@@ -195,11 +200,14 @@ async def workers(
         spec["worker"]["template"], worker_metadata, status["scheduler"]["address"]
     )
     kopf.adopt(worker_template)
-    pods = await asyncio.gather(
-        *(
-            v1.create_namespaced_pod(namespace, worker_template)
-            for _ in range(required_workers)
+
+    async with queue_lock:
+        pods = await asyncio.gather(
+            *(
+                v1.create_namespaced_pod(namespace, worker_template)
+                for _ in range(required_workers)
+            )
         )
-    )
-    pod_names = {p.metadata.name for p in pods}
-    pod_queue.update(pod_names)
+        pod_names = {p.metadata.name for p in pods}
+        pod_queue.update(pod_names)
+        logger.info(f"Created pods: {', '.join(pod_names)}")
