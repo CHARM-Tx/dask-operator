@@ -31,7 +31,7 @@ type RetiredWorker struct {
 type WorkerStatus struct {
 	Count int32 `json:"count,omitempty"`
 	// +listType=map
-	// +listMapKey=Id
+	// +listMapKey=id
 	Retiring []RetiredWorker `json:"retiring,omitempty"`
 }
 

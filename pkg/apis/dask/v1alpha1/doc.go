@@ -1,4 +1,4 @@
 // +k8s:deepcopy-gen=package
-// +groupName=dask.k8s.io
+// +groupName=dask.charmtx.com
 
 package v1alpha1

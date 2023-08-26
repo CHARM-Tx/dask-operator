@@ -141,8 +141,8 @@ func (c *Controller) enqueueObject(obj interface{}) {
 	cluster, err := c.clusters.Lister().Clusters(object.GetNamespace()).Get(ownerRef.Name)
 	if err != nil {
 		logger.Info("Ignoring orphaned object", "object", klog.KObj(object), "cluster", ownerRef.Name)
+		return
 	}
-
 	c.enqueueCluster(cluster)
 }
 

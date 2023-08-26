@@ -103,6 +103,13 @@ func buildSchedulerDeployment(name string, cluster *daskv1alpha1.Cluster) (*apps
 	labels := clusterLabels(cluster, "scheduler")
 
 	podTemplate := cluster.Spec.Scheduler.Template.DeepCopy()
+	if podTemplate.Labels == nil {
+		podTemplate.Labels = labels
+	} else {
+		for k, v := range labels {
+			podTemplate.Labels[k] = v
+		}
+	}
 	schedulerContainer := getByKey(podTemplate.Spec.Containers, func(c corev1.Container) string { return c.Name }, "scheduler")
 	if schedulerContainer == nil {
 		return nil, fmt.Errorf("scheduler template has no container named 'scheduler'")
@@ -133,6 +140,7 @@ func buildSchedulerDeployment(name string, cluster *daskv1alpha1.Cluster) (*apps
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{MatchLabels: labels},
 			Template: *podTemplate,
 		},
 	}
