@@ -7,7 +7,11 @@ package main
 
 import (
 	"context"
+	"os"
+	"os/signal"
+	"syscall"
 
+	"github.com/CHARM-Tx/dask-operator/pkg/generated/clientset"
 	flag "github.com/spf13/pflag"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -18,6 +22,23 @@ func init() {
 	klog.InitFlags(nil)
 }
 
+func signalContext() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	c := make(chan os.Signal, 2)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-c
+		cancel()
+
+		// If the signal is received a second time, exit immediately
+		<-c
+		os.Exit(1)
+	}()
+
+	return ctx
+}
+
 func main() {
 	flag.Parse()
 
@@ -26,11 +47,17 @@ func main() {
 		panic(err.Error())
 	}
 
-	clientset, err := kubernetes.NewForConfig(config)
+	kubeclient, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		panic(err.Error())
 	}
 
-	controller := NewController(clientset)
+	client, err := clientset.NewForConfig(config)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	ctx := signalContext()
+	controller := NewController(kubeclient, client, ctx)
 	controller.Run(1, context.Background())
 }

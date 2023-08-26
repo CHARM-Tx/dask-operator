@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/CHARM-Tx/dask-operator/pkg/generated/clientset/fake"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/klog/v2/ktesting"
 )
@@ -18,7 +19,8 @@ func newFixture(t *testing.T) *fixture {
 
 func (f *fixture) newController(ctx context.Context) *Controller {
 	kubeclient := k8sfake.NewSimpleClientset()
-	return NewController(kubeclient)
+	client := fake.NewSimpleClientset()
+	return NewController(kubeclient, client, ctx)
 }
 
 func TestSyncHandler(t *testing.T) {
