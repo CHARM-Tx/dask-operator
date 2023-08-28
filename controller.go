@@ -3,13 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/CHARM-Tx/dask-operator/pkg/apis/dask"
-	"github.com/CHARM-Tx/dask-operator/pkg/apis/dask/v1alpha1"
+	daskv1alpha1 "github.com/CHARM-Tx/dask-operator/pkg/apis/dask/v1alpha1"
 	"github.com/CHARM-Tx/dask-operator/pkg/generated/clientset"
-	informers "github.com/CHARM-Tx/dask-operator/pkg/generated/informers/externalversions"
-	listers "github.com/CHARM-Tx/dask-operator/pkg/generated/listers/dask/v1alpha1"
+	daskinformers "github.com/CHARM-Tx/dask-operator/pkg/generated/informers/externalversions"
+	daskv1alpha1informers "github.com/CHARM-Tx/dask-operator/pkg/generated/informers/externalversions/dask/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,18 +18,24 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	k8sinformers "k8s.io/client-go/informers"
+	appsv1informers "k8s.io/client-go/informers/apps/v1"
+	corev1informers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
-	appsv1listers "k8s.io/client-go/listers/apps/v1"
-	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 )
 
 type Controller struct {
-	clusterLister    listers.ClusterLister
-	deploymentLister appsv1listers.DeploymentLister
-	podLister        corev1listers.PodLister
+	kubeclient kubernetes.Interface
+	daskclient clientset.Interface
+
+	factories []informerFactory
+
+	pods        corev1informers.PodInformer
+	services    corev1informers.ServiceInformer
+	deployments appsv1informers.DeploymentInformer
+	clusters    daskv1alpha1informers.ClusterInformer
 
 	workqueue workqueue.RateLimitingInterface
 }
@@ -36,7 +43,7 @@ type Controller struct {
 func NewController(kubeclient kubernetes.Interface, daskclient clientset.Interface, ctx context.Context) *Controller {
 	logger := klog.FromContext(ctx)
 
-	daskInformerFactory := informers.NewSharedInformerFactory(daskclient, 0*time.Second)
+	daskInformerFactory := daskinformers.NewSharedInformerFactory(daskclient, 0*time.Second)
 	kubeInformerFactory := k8sinformers.NewSharedInformerFactoryWithOptions(
 		kubeclient,
 		0*time.Second,
@@ -45,14 +52,22 @@ func NewController(kubeclient kubernetes.Interface, daskclient clientset.Interfa
 		}),
 	)
 	pods := kubeInformerFactory.Core().V1().Pods()
+	services := kubeInformerFactory.Core().V1().Services()
 	deployments := kubeInformerFactory.Apps().V1().Deployments()
 	clusters := daskInformerFactory.Dask().V1alpha1().Clusters()
 
 	controller := &Controller{
-		podLister:        pods.Lister(),
-		deploymentLister: deployments.Lister(),
-		clusterLister:    clusters.Lister(),
-		workqueue:        workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
+		kubeclient: kubeclient,
+		daskclient: daskclient,
+
+		factories: []informerFactory{kubeInformerFactory, daskInformerFactory},
+
+		pods:        pods,
+		services:    services,
+		deployments: deployments,
+		clusters:    clusters,
+
+		workqueue: workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
 	}
 
 	logger.Info("Setting up event handlers")
@@ -81,16 +96,13 @@ func NewController(kubeclient kubernetes.Interface, daskclient clientset.Interfa
 	clusters.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: controller.enqueueCluster,
 		UpdateFunc: func(old, new interface{}) {
-			oldCluster := old.(*v1alpha1.Cluster)
-			newCluster := new.(*v1alpha1.Cluster)
+			oldCluster := old.(*daskv1alpha1.Cluster)
+			newCluster := new.(*daskv1alpha1.Cluster)
 			if oldCluster.ResourceVersion != newCluster.ResourceVersion {
 				controller.enqueueCluster(newCluster)
 			}
 		},
 	})
-
-	kubeInformerFactory.Start(ctx.Done())
-	daskInformerFactory.Start(ctx.Done())
 
 	return controller
 }
@@ -115,11 +127,11 @@ func (c *Controller) enqueueObject(obj interface{}) {
 	if ownerRef == nil {
 		return
 	}
-	if schema.FromAPIVersionAndKind(ownerRef.APIVersion, ownerRef.Kind) == v1alpha1.SchemeGroupVersion.WithKind("Cluster") {
+	if schema.FromAPIVersionAndKind(ownerRef.APIVersion, ownerRef.Kind) == daskv1alpha1.SchemeGroupVersion.WithKind("Cluster") {
 		return
 	}
 
-	cluster, err := c.clusterLister.Clusters(object.GetNamespace()).Get(ownerRef.Name)
+	cluster, err := c.clusters.Lister().Clusters(object.GetNamespace()).Get(ownerRef.Name)
 	if err != nil {
 		logger.Info("Ignoring orphaned object", "object", klog.KObj(object), "cluster", ownerRef.Name)
 	}
@@ -136,10 +148,6 @@ func (c *Controller) enqueueCluster(obj interface{}) {
 	c.workqueue.Add(key)
 }
 
-func (c *Controller) syncHandler(ctx context.Context, key string) error {
-	return nil
-}
-
 func (c *Controller) processNextWorkItem(ctx context.Context) bool {
 	obj, shutdown := c.workqueue.Get()
 	logger := klog.FromContext(ctx)
@@ -151,10 +159,8 @@ func (c *Controller) processNextWorkItem(ctx context.Context) bool {
 	err := func(obj interface{}) error {
 		defer c.workqueue.Done(obj)
 
-		var key string
-		var ok bool
-
-		if key, ok = obj.(string); !ok {
+		key, ok := obj.(string)
+		if !ok {
 			c.workqueue.Forget(obj)
 			utilruntime.HandleError(fmt.Errorf("expected string in workqueue but got %#v", obj))
 			return nil
@@ -183,12 +189,43 @@ func (c *Controller) runWorker(ctx context.Context) {
 	}
 }
 
-func (c *Controller) Run(workers int, ctx context.Context) {
+func (c *Controller) Run(workers int, ctx context.Context) error {
 	defer utilruntime.HandleCrash()
 
 	logger := klog.FromContext(ctx)
+	logger.Info("Waiting for caches to sync")
+
+	for _, factory := range c.factories {
+		factory.Start(ctx.Done())
+	}
+
+	for _, factory := range c.factories {
+		if err := waitForSync(ctx, factory); err != nil {
+			return err
+		}
+	}
+
 	logger.Info("Starting workers", "count", workers)
 	for i := 0; i < workers; i++ {
 		go wait.UntilWithContext(ctx, c.runWorker, time.Second)
 	}
+
+	logger.Info("Started workers")
+	<-ctx.Done()
+	logger.Info("Shutting down workers")
+	return nil
+}
+
+type informerFactory interface {
+	WaitForCacheSync(<-chan struct{}) map[reflect.Type]bool
+	Start(<-chan struct{})
+}
+
+func waitForSync(ctx context.Context, factory informerFactory) error {
+	for v, ok := range factory.WaitForCacheSync(ctx.Done()) {
+		if !ok {
+			return fmt.Errorf("cache failed to sync: %v", v)
+		}
+	}
+	return nil
 }
