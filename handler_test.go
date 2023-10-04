@@ -87,6 +87,22 @@ func TestCreatesResources(t *testing.T) {
 				},
 				Service: corev1.ServiceSpec{},
 			},
+			Worker: daskv1alpha1.WorkerSpec{
+				MinReplicas: 0,
+				Replicas:    1,
+				MaxReplicas: 1,
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:    "worker",
+								Image:   "ubuntu:22.04",
+								Command: []string{"dask", "worker"},
+							},
+						},
+					},
+				},
+			},
 		},
 	}
 	kubeObjects := []runtime.Object{}
@@ -104,6 +120,11 @@ func TestCreatesResources(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unable to construct expected deployment: %s", err)
 	}
+
+	expectedPod, err := buildWorkerPod("foo-worker", "foo-scheduler", &cluster)
+	if err != nil {
+		t.Fatalf("unable to construct expected worker pod: %s", err)
+	}
 	expectedActions := []k8stesting.Action{
 		k8stesting.NewCreateAction(
 			schema.GroupVersionResource{Resource: "services"},
@@ -114,6 +135,11 @@ func TestCreatesResources(t *testing.T) {
 			schema.GroupVersionResource{Group: "apps", Resource: "deployments"},
 			cluster.Namespace,
 			expectedDeployment,
+		),
+		k8stesting.NewCreateAction(
+			schema.GroupVersionResource{Resource: "pods"},
+			cluster.Namespace,
+			expectedPod,
 		),
 	}
 

@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/tools/cache"
@@ -33,6 +34,9 @@ func (c *Controller) syncHandler(ctx context.Context, key string) error {
 	}
 
 	if err := c.handleScheduler(ctx, cluster); err != nil {
+		return err
+	}
+	if err := c.handleWorker(ctx, cluster); err != nil {
 		return err
 	}
 
@@ -67,16 +71,36 @@ func getByKey[T interface{}, K comparable](values []T, keyFn func(T) K, key K) *
 	return nil
 }
 
-func clusterLabels(cluster *daskv1alpha1.Cluster) map[string]string {
+func clusterLabels(cluster *daskv1alpha1.Cluster, role string) map[string]string {
 	clusterName := cluster.ObjectMeta.Name
 	return map[string]string{
 		fmt.Sprintf("%s/cluster", dask.GroupName): clusterName,
-		fmt.Sprintf("%s/role", dask.GroupName):    "scheduler",
+		fmt.Sprintf("%s/role", dask.GroupName):    role,
+	}
+}
+
+func addProbes(container *corev1.Container) {
+	probeTemplate := corev1.Probe{
+		ProbeHandler: corev1.ProbeHandler{
+			HTTPGet: &corev1.HTTPGetAction{Port: intstr.FromString("http-dashboard"), Path: "/health"},
+		},
+	}
+	if container.ReadinessProbe == nil {
+		probe := probeTemplate.DeepCopy()
+		probe.InitialDelaySeconds = 5
+		probe.PeriodSeconds = 10
+		container.ReadinessProbe = probe
+	}
+	if container.LivenessProbe == nil {
+		probe := probeTemplate.DeepCopy()
+		probe.InitialDelaySeconds = 15
+		probe.PeriodSeconds = 20
+		container.LivenessProbe = probe
 	}
 }
 
 func buildSchedulerDeployment(name string, cluster *daskv1alpha1.Cluster) (*appsv1.Deployment, error) {
-	labels := clusterLabels(cluster)
+	labels := clusterLabels(cluster, "scheduler")
 
 	podTemplate := cluster.Spec.Scheduler.Template.DeepCopy()
 	schedulerContainer := getByKey(podTemplate.Spec.Containers, func(c corev1.Container) string { return c.Name }, "scheduler")
@@ -96,23 +120,7 @@ func buildSchedulerDeployment(name string, cluster *daskv1alpha1.Cluster) (*apps
 		},
 	}
 	schedulerContainer.Env = replaceByName(podEnv, schedulerContainer.Env, func(p corev1.EnvVar) string { return p.Name })
-	probeTemplate := corev1.Probe{
-		ProbeHandler: corev1.ProbeHandler{
-			HTTPGet: &corev1.HTTPGetAction{Port: intstr.FromString("http-dashboard"), Path: "/health"},
-		},
-	}
-	if schedulerContainer.ReadinessProbe == nil {
-		probe := probeTemplate.DeepCopy()
-		probe.InitialDelaySeconds = 5
-		probe.PeriodSeconds = 10
-		schedulerContainer.ReadinessProbe = probe
-	}
-	if schedulerContainer.LivenessProbe == nil {
-		probe := probeTemplate.DeepCopy()
-		probe.InitialDelaySeconds = 15
-		probe.PeriodSeconds = 20
-		schedulerContainer.LivenessProbe = probe
-	}
+	addProbes(schedulerContainer)
 
 	replicas := int32(1)
 	deployment := &appsv1.Deployment{
@@ -133,7 +141,7 @@ func buildSchedulerDeployment(name string, cluster *daskv1alpha1.Cluster) (*apps
 }
 
 func buildSchedulerService(name string, cluster *daskv1alpha1.Cluster) *corev1.Service {
-	labels := clusterLabels(cluster)
+	labels := clusterLabels(cluster, "scheduler")
 
 	serviceSpec := cluster.Spec.Scheduler.Service.DeepCopy()
 	servicePorts := []corev1.ServicePort{
@@ -188,6 +196,79 @@ func (c *Controller) handleScheduler(ctx context.Context, cluster *daskv1alpha1.
 	ac := daskv1alpha1ac.Cluster(cluster.Name, cluster.Namespace).WithStatus(
 		daskv1alpha1ac.ClusterStatus().WithScheduler(
 			daskv1alpha1ac.SchedulerStatus().WithAddress(serviceAddress),
+		),
+	)
+	clusterClient := c.daskclient.DaskV1alpha1().Clusters(cluster.Namespace)
+	_, err = clusterClient.Apply(ctx, ac, metav1.ApplyOptions{FieldManager: fieldManager})
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func buildWorkerPod(name string, schedulerName string, cluster *daskv1alpha1.Cluster) (*corev1.Pod, error) {
+	podTemplate := cluster.Spec.Worker.Template.DeepCopy()
+	podTemplate.ObjectMeta.GenerateName = name
+	if podTemplate.ObjectMeta.Labels == nil {
+		podTemplate.ObjectMeta.Labels = clusterLabels(cluster, "worker")
+	} else {
+		for k, v := range clusterLabels(cluster, "worker") {
+			podTemplate.ObjectMeta.Labels[k] = v
+		}
+	}
+	podTemplate.ObjectMeta.OwnerReferences = []metav1.OwnerReference{
+		*metav1.NewControllerRef(cluster, daskv1alpha1.SchemeGroupVersion.WithKind("Cluster")),
+	}
+
+	workerContainer := getByKey(podTemplate.Spec.Containers, func(c corev1.Container) string { return c.Name }, "worker")
+	if workerContainer == nil {
+		return nil, fmt.Errorf("worker template has no container named 'worker'")
+	}
+	podPorts := []corev1.ContainerPort{
+		{Name: "http-dashboard", ContainerPort: 8787, Protocol: "TCP"},
+	}
+	workerContainer.Ports = replaceByName(podPorts, workerContainer.Ports, func(p corev1.ContainerPort) string { return p.Name })
+	podEnv := []corev1.EnvVar{
+		{
+			Name:      "DASK_WORKER_NAME",
+			ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"}},
+		},
+		{
+			Name:  "DASK_SCHEDULER_ADDRESS",
+			Value: fmt.Sprintf("%s.%s.svc", schedulerName, cluster.Namespace),
+		},
+	}
+	workerContainer.Env = replaceByName(podEnv, workerContainer.Env, func(p corev1.EnvVar) string { return p.Name })
+	addProbes(workerContainer)
+
+	pod := &corev1.Pod{ObjectMeta: podTemplate.ObjectMeta, Spec: podTemplate.Spec}
+	return pod, nil
+}
+
+func (c *Controller) handleWorker(ctx context.Context, cluster *daskv1alpha1.Cluster) error {
+	fieldManager := "dask-operator"
+	name := fmt.Sprintf("%s-worker", cluster.Name)
+	schedulerName := fmt.Sprintf("%s-scheduler", cluster.Name)
+
+	pods, err := c.pods.Lister().Pods(cluster.Namespace).List(labels.SelectorFromSet(clusterLabels(cluster, "worker")))
+	if err != nil {
+		return err
+	}
+
+	pod, err := buildWorkerPod(name, schedulerName, cluster)
+	if err != nil {
+		return err
+	}
+
+	for i := 0; i < max(int(cluster.Spec.Worker.Replicas)-len(pods), 0); i++ {
+		// TODO: Some sort of rate limiting or sanity check
+		c.kubeclient.CoreV1().Pods(cluster.Namespace).Create(ctx, pod, metav1.CreateOptions{})
+	}
+
+	ac := daskv1alpha1ac.Cluster(cluster.Name, cluster.Namespace).WithStatus(
+		daskv1alpha1ac.ClusterStatus().WithWorkers(
+			daskv1alpha1ac.WorkerStatus().WithCount(int32(len(pods))),
 		),
 	)
 	clusterClient := c.daskclient.DaskV1alpha1().Clusters(cluster.Namespace)
