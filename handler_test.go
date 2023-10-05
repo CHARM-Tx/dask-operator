@@ -6,6 +6,7 @@ import (
 
 	daskv1alpha1 "github.com/CHARM-Tx/dask-operator/pkg/apis/dask/v1alpha1"
 	"github.com/CHARM-Tx/dask-operator/pkg/generated/clientset/fake"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -32,12 +33,23 @@ func newFixture(t *testing.T, objects []runtime.Object, kubeObjects []runtime.Ob
 	}
 }
 
-func (f *fixture) newController(ctx context.Context, objects []runtime.Object) *Controller {
+func (f *fixture) newController(ctx context.Context, objects, kubeObjects []runtime.Object) *Controller {
 	controller := NewController(f.kubeclient, f.client, ctx)
 	for _, o := range objects {
 		switch o := o.(type) {
 		case *daskv1alpha1.Cluster:
 			controller.clusters.Informer().GetIndexer().Add(o)
+		}
+	}
+
+	for _, o := range kubeObjects {
+		switch o := o.(type) {
+		case *corev1.Service:
+			controller.services.Informer().GetIndexer().Add(o)
+		case *corev1.Pod:
+			controller.pods.Informer().GetIndexer().Add(o)
+		case *appsv1.Deployment:
+			controller.deployments.Informer().GetIndexer().Add(o)
 		}
 	}
 
@@ -110,7 +122,7 @@ func TestCreatesResources(t *testing.T) {
 	f := newFixture(t, objects, kubeObjects)
 
 	_, ctx := ktesting.NewTestContext(t)
-	controller := f.newController(ctx, objects)
+	controller := f.newController(ctx, objects, kubeObjects)
 
 	if err := controller.syncHandler(ctx, getKey(&cluster, t)); err != nil {
 		t.Fatalf("Error syncing cluster: %v", err)
@@ -153,5 +165,70 @@ func TestCreatesResources(t *testing.T) {
 		if !(expectedAction.Matches(action.GetVerb(), action.GetResource().Resource) && action.GetSubresource() == expectedAction.GetSubresource()) {
 			t.Errorf("action %v does not match expected action %v", action, expectedAction)
 		}
+	}
+}
+
+func TestIdle(t *testing.T) {
+	cluster := daskv1alpha1.Cluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "bar"},
+		Spec: daskv1alpha1.ClusterSpec{
+			Scheduler: daskv1alpha1.SchedulerSpec{
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:    "scheduler",
+								Image:   "ubuntu:22.04",
+								Command: []string{"dask", "scheduler"},
+							},
+						},
+					},
+				},
+				Service: corev1.ServiceSpec{},
+			},
+			Worker: daskv1alpha1.WorkerSpec{
+				MinReplicas: 0,
+				Replicas:    1,
+				MaxReplicas: 1,
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:    "worker",
+								Image:   "ubuntu:22.04",
+								Command: []string{"dask", "worker"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	ownerRefs := []metav1.OwnerReference{*metav1.NewControllerRef(&cluster, daskv1alpha1.SchemeGroupVersion.WithKind("Cluster"))}
+	kubeObjects := []runtime.Object{
+		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "foo-scheduler", Namespace: "bar", OwnerReferences: ownerRefs}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "foo-scheduler", Namespace: "bar", OwnerReferences: ownerRefs}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+			Name:            "foo",
+			Namespace:       "bar",
+			Labels:          clusterLabels(&cluster, "worker"),
+			OwnerReferences: ownerRefs,
+		}},
+	}
+	objects := []runtime.Object{&cluster}
+	f := newFixture(t, objects, kubeObjects)
+
+	_, ctx := ktesting.NewTestContext(t)
+	controller := f.newController(ctx, objects, kubeObjects)
+
+	if err := controller.syncHandler(ctx, getKey(&cluster, t)); err != nil {
+		t.Fatalf("Error syncing cluster: %v", err)
+	}
+
+	expectedActions := []k8stesting.Action{}
+	actions := filterActions(f.kubeclient.Actions())
+	if len(actions) != len(expectedActions) {
+		t.Errorf("expected %d actions, got %d", len(expectedActions), len(actions))
 	}
 }

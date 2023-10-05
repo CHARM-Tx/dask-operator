@@ -48,7 +48,7 @@ func NewController(kubeclient kubernetes.Interface, daskclient clientset.Interfa
 		kubeclient,
 		0*time.Second,
 		k8sinformers.WithTweakListOptions(func(opts *metav1.ListOptions) {
-			opts.LabelSelector = fmt.Sprintf("%s/cluster=", dask.GroupName)
+			opts.LabelSelector = fmt.Sprintf("%s/cluster", dask.GroupName)
 		}),
 	)
 	pods := kubeInformerFactory.Core().V1().Pods()

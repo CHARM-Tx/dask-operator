@@ -28,6 +28,8 @@ type SchedulerStatus struct {
 
 type WorkerStatus struct {
 	Count int32 `json:"count,omitempty"`
+	// +listType=set
+	Retiring []string `json:"retiring,omitempty"`
 }
 
 type ClusterStatus struct {
