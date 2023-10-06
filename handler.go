@@ -255,21 +255,45 @@ func (c *Controller) handleWorker(ctx context.Context, cluster *daskv1alpha1.Clu
 	if err != nil {
 		return err
 	}
+	podIds := make(map[string]struct{}, len(pods))
+	for _, pod := range pods {
+		podIds[pod.Name] = struct{}{}
+	}
 
 	pod, err := buildWorkerPod(name, schedulerName, cluster)
 	if err != nil {
 		return err
 	}
 
-	for i := 0; i < max(int(cluster.Spec.Worker.Replicas)-len(pods), 0); i++ {
-		// TODO: Some sort of rate limiting or sanity check
-		c.kubeclient.CoreV1().Pods(cluster.Namespace).Create(ctx, pod, metav1.CreateOptions{})
+	status := daskv1alpha1ac.WorkerStatus().WithCount(int32(len(pods)))
+	for _, retiringPod := range cluster.Status.Workers.Retiring {
+		if _, ok := podIds[retiringPod.Id]; ok {
+			// This pod hasn't terminated yet, keep tracking it in the retiring list
+			status.WithRetiring(daskv1alpha1ac.RetiredWorker().WithId(retiringPod.Id))
+		}
+	}
+
+	desiredPods := int(cluster.Spec.Worker.Replicas) - len(pods) + len(cluster.Status.Workers.Retiring)
+	if desiredPods > 0 {
+		for i := 0; i < desiredPods; i++ {
+			// TODO: Some sort of rate limiting or sanity check
+			c.kubeclient.CoreV1().Pods(cluster.Namespace).Create(ctx, pod, metav1.CreateOptions{})
+		}
+	} else if desiredPods < 0 {
+		retirings, err := c.scheduler.retireWorkers(cluster, -desiredPods)
+		if err != nil {
+			return err
+		}
+
+		for _, retiring := range retirings {
+			status.WithRetiring(daskv1alpha1ac.RetiredWorker().WithId(retiring.Id))
+		}
+	} else {
+		return nil
 	}
 
 	ac := daskv1alpha1ac.Cluster(cluster.Name, cluster.Namespace).WithStatus(
-		daskv1alpha1ac.ClusterStatus().WithWorkers(
-			daskv1alpha1ac.WorkerStatus().WithCount(int32(len(pods))),
-		),
+		daskv1alpha1ac.ClusterStatus().WithWorkers(status),
 	)
 	clusterClient := c.daskclient.DaskV1alpha1().Clusters(cluster.Namespace)
 	_, err = clusterClient.Apply(ctx, ac, metav1.ApplyOptions{FieldManager: fieldManager})

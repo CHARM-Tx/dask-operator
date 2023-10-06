@@ -11,30 +11,46 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2/ktesting"
 )
 
+type fakeSchedulerClient struct {
+	events [][]daskv1alpha1.RetiredWorker
+}
+
+func (c *fakeSchedulerClient) retireWorkers(cluster *daskv1alpha1.Cluster, n int) ([]daskv1alpha1.RetiredWorker, error) {
+	retiredWorkers := make([]daskv1alpha1.RetiredWorker, 0, n)
+	for i := 0; i < n; i++ {
+		retiredWorkers = append(retiredWorkers, daskv1alpha1.RetiredWorker{Id: "foo"})
+	}
+	c.events = append(c.events, retiredWorkers)
+	return retiredWorkers, nil
+}
+
 type fixture struct {
 	t *testing.T
 
-	kubeclient *k8sfake.Clientset
-	client     *fake.Clientset
+	kubeclient      *k8sfake.Clientset
+	client          *fake.Clientset
+	schedulerclient *fakeSchedulerClient
 }
 
 func newFixture(t *testing.T, objects []runtime.Object, kubeObjects []runtime.Object) *fixture {
 	return &fixture{
 		t: t,
 
-		kubeclient: k8sfake.NewSimpleClientset(kubeObjects...),
-		client:     fake.NewSimpleClientset(objects...),
+		kubeclient:      k8sfake.NewSimpleClientset(kubeObjects...),
+		client:          fake.NewSimpleClientset(objects...),
+		schedulerclient: &fakeSchedulerClient{events: make([][]daskv1alpha1.RetiredWorker, 0)},
 	}
 }
 
 func (f *fixture) newController(ctx context.Context, objects, kubeObjects []runtime.Object) *Controller {
-	controller := NewController(f.kubeclient, f.client, ctx)
+	controller := NewController(f.kubeclient, f.client, f.schedulerclient, ctx)
 	for _, o := range objects {
 		switch o := o.(type) {
 		case *daskv1alpha1.Cluster:
@@ -100,9 +116,7 @@ func TestCreatesResources(t *testing.T) {
 				Service: corev1.ServiceSpec{},
 			},
 			Worker: daskv1alpha1.WorkerSpec{
-				MinReplicas: 0,
-				Replicas:    1,
-				MaxReplicas: 1,
+				Replicas: 1,
 				Template: corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
@@ -187,9 +201,7 @@ func TestIdle(t *testing.T) {
 				Service: corev1.ServiceSpec{},
 			},
 			Worker: daskv1alpha1.WorkerSpec{
-				MinReplicas: 0,
-				Replicas:    1,
-				MaxReplicas: 1,
+				Replicas: 1,
 				Template: corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
@@ -230,5 +242,102 @@ func TestIdle(t *testing.T) {
 	actions := filterActions(f.kubeclient.Actions())
 	if len(actions) != len(expectedActions) {
 		t.Errorf("expected %d actions, got %d", len(expectedActions), len(actions))
+	}
+}
+
+func TestRetiresPods(t *testing.T) {
+	cluster := daskv1alpha1.Cluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "bar"},
+		Spec: daskv1alpha1.ClusterSpec{
+			Scheduler: daskv1alpha1.SchedulerSpec{
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:    "scheduler",
+								Image:   "ubuntu:22.04",
+								Command: []string{"dask", "scheduler"},
+							},
+						},
+					},
+				},
+				Service: corev1.ServiceSpec{},
+			},
+			Worker: daskv1alpha1.WorkerSpec{
+				Replicas: 0,
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:    "worker",
+								Image:   "ubuntu:22.04",
+								Command: []string{"dask", "worker"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	ownerRefs := []metav1.OwnerReference{*metav1.NewControllerRef(&cluster, daskv1alpha1.SchemeGroupVersion.WithKind("Cluster"))}
+	kubeObjects := []runtime.Object{
+		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "foo-scheduler", Namespace: "bar", OwnerReferences: ownerRefs}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "foo-scheduler", Namespace: "bar", OwnerReferences: ownerRefs}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+			Name:            "foo",
+			Namespace:       "bar",
+			Labels:          clusterLabels(&cluster, "worker"),
+			OwnerReferences: ownerRefs,
+		}},
+	}
+	objects := []runtime.Object{&cluster}
+	f := newFixture(t, objects, kubeObjects)
+
+	_, ctx := ktesting.NewTestContext(t)
+	controller := f.newController(ctx, objects, kubeObjects)
+
+	if err := controller.syncHandler(ctx, getKey(&cluster, t)); err != nil {
+		t.Fatalf("Error syncing cluster: %v", err)
+	}
+
+	expectedActions := []k8stesting.Action{}
+	actions := filterActions(f.kubeclient.Actions())
+	if len(actions) != len(expectedActions) {
+		t.Errorf("expected %d actions, got %d", len(expectedActions), len(actions))
+	}
+
+	expectedDaskActions := []k8stesting.Action{
+		k8stesting.NewPatchAction(
+			schema.GroupVersionResource{Group: "dask.charmtx.com", Resource: "clusters"},
+			cluster.Namespace,
+			cluster.Name,
+			types.ApplyPatchType,
+			[]byte(""), // TODO: Check patch contents
+		),
+		k8stesting.NewPatchAction(
+			schema.GroupVersionResource{Group: "dask.charmtx.com", Resource: "clusters"},
+			cluster.Namespace,
+			cluster.Name,
+			types.ApplyPatchType,
+			[]byte(""), // TODO: Check patch contents
+		),
+	}
+	daskActions := filterActions(f.client.Actions())
+	if len(daskActions) != len(expectedDaskActions) {
+		t.Errorf("expected %d dask actions, got %d", len(expectedDaskActions), len(daskActions))
+	}
+
+	for i, daskAction := range daskActions {
+		expectedDaskAction := expectedDaskActions[i]
+		if !(expectedDaskAction.Matches(daskAction.GetVerb(), daskAction.GetResource().Resource) && daskAction.GetSubresource() == expectedDaskAction.GetSubresource()) {
+			t.Errorf("dask action %v does not match expected dask action %v", daskAction, expectedDaskAction)
+		}
+	}
+
+	expectedApiCalls := [][]daskv1alpha1.RetiredWorker{{{Id: "foo"}}}
+	apiCalls := f.schedulerclient.events
+	if len(expectedApiCalls) != len(apiCalls) {
+		t.Errorf("expected %d actions, got %d", len(expectedApiCalls), len(apiCalls))
 	}
 }

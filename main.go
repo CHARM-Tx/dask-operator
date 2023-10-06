@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -58,7 +59,9 @@ func main() {
 		panic(err.Error())
 	}
 
+	schedulerClient := &HttpSchedulerClient{httpclient: http.Client{}}
+
 	ctx := signalContext()
-	controller := NewController(kubeclient, client, ctx)
+	controller := NewController(kubeclient, client, schedulerClient, ctx)
 	controller.Run(1, context.Background())
 }

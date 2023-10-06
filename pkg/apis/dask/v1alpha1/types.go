@@ -11,10 +11,8 @@ type SchedulerSpec struct {
 }
 
 type WorkerSpec struct {
-	Replicas    int32              `json:"replicas,omitempty"`
-	MinReplicas int32              `json:"minReplicas,omitempty"`
-	MaxReplicas int32              `json:"maxReplicas,omitempty"`
-	Template    v1.PodTemplateSpec `json:"template,omitempty"`
+	Replicas int32              `json:"replicas,omitempty"`
+	Template v1.PodTemplateSpec `json:"template,omitempty"`
 }
 
 type ClusterSpec struct {
@@ -26,10 +24,15 @@ type SchedulerStatus struct {
 	Address string `json:"address,omitempty"`
 }
 
+type RetiredWorker struct {
+	Id string `json:"id,omitEmpty"`
+}
+
 type WorkerStatus struct {
 	Count int32 `json:"count,omitempty"`
-	// +listType=set
-	Retiring []string `json:"retiring,omitempty"`
+	// +listType=map
+	// +listMapKey=Id
+	Retiring []RetiredWorker `json:"retiring,omitempty"`
 }
 
 type ClusterStatus struct {

@@ -29,6 +29,7 @@ import (
 type Controller struct {
 	kubeclient kubernetes.Interface
 	daskclient clientset.Interface
+	scheduler  SchedulerClient
 
 	factories []informerFactory
 
@@ -40,7 +41,12 @@ type Controller struct {
 	workqueue workqueue.RateLimitingInterface
 }
 
-func NewController(kubeclient kubernetes.Interface, daskclient clientset.Interface, ctx context.Context) *Controller {
+func NewController(
+	kubeclient kubernetes.Interface,
+	daskclient clientset.Interface,
+	schedulerclient SchedulerClient,
+	ctx context.Context,
+) *Controller {
 	logger := klog.FromContext(ctx)
 
 	daskInformerFactory := daskinformers.NewSharedInformerFactory(daskclient, 0*time.Second)
@@ -59,6 +65,7 @@ func NewController(kubeclient kubernetes.Interface, daskclient clientset.Interfa
 	controller := &Controller{
 		kubeclient: kubeclient,
 		daskclient: daskclient,
+		scheduler:  schedulerclient,
 
 		factories: []informerFactory{kubeInformerFactory, daskInformerFactory},
 
