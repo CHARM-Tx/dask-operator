@@ -31,9 +31,9 @@ func replaceByName[T any](template, overrides []T, keyFn func(T) string) []T {
 
 // Get a reference to the object from a list where keyFn is true.
 func getByKey[T interface{}, K comparable](values []T, keyFn func(T) K, key K) *T {
-	for _, v := range values {
+	for i, v := range values {
 		if keyFn(v) == key {
-			return &v
+			return &values[i]
 		}
 	}
 	return nil
@@ -139,7 +139,7 @@ func buildSchedulerService(name string, cluster *daskv1alpha1.Cluster) *corev1.S
 
 func buildWorkerPod(name string, schedulerName string, cluster *daskv1alpha1.Cluster) (*corev1.Pod, error) {
 	podTemplate := cluster.Spec.Worker.Template.DeepCopy()
-	podTemplate.ObjectMeta.GenerateName = name
+	podTemplate.ObjectMeta.GenerateName = fmt.Sprintf("%s-", name)
 	if podTemplate.ObjectMeta.Labels == nil {
 		podTemplate.ObjectMeta.Labels = clusterLabels(cluster, "worker")
 	} else {
