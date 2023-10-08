@@ -137,7 +137,11 @@ func buildSchedulerService(name string, cluster *daskv1alpha1.Cluster) *corev1.S
 	}
 }
 
-func buildWorkerPod(name string, schedulerName string, cluster *daskv1alpha1.Cluster) (*corev1.Pod, error) {
+func buildWorkerPod(name string, scheduler *corev1.Service, cluster *daskv1alpha1.Cluster) (*corev1.Pod, error) {
+	schedulerPort := getByKey(scheduler.Spec.Ports, func(p corev1.ServicePort) string { return p.Name }, "tcp-comm")
+	if schedulerPort == nil {
+		return nil, fmt.Errorf("scheduler service has no port \"tcp-comm\"")
+	}
 	podTemplate := cluster.Spec.Worker.Template.DeepCopy()
 	podTemplate.ObjectMeta.GenerateName = fmt.Sprintf("%s-", name)
 	if podTemplate.ObjectMeta.Labels == nil {
@@ -166,7 +170,7 @@ func buildWorkerPod(name string, schedulerName string, cluster *daskv1alpha1.Clu
 		},
 		{
 			Name:  "DASK_SCHEDULER_ADDRESS",
-			Value: fmt.Sprintf("%s.%s.svc", schedulerName, cluster.Namespace),
+			Value: fmt.Sprintf("%s.%s.svc:%d", scheduler.Name, cluster.Namespace, schedulerPort.Port),
 		},
 	}
 	workerContainer.Env = replaceByName(podEnv, workerContainer.Env, func(p corev1.EnvVar) string { return p.Name })

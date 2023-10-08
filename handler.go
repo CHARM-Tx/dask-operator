@@ -6,6 +6,7 @@ import (
 
 	daskv1alpha1 "github.com/CHARM-Tx/dask-operator/pkg/apis/dask/v1alpha1"
 	daskv1alpha1ac "github.com/CHARM-Tx/dask-operator/pkg/generated/applyconfigurations/dask/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -29,17 +30,18 @@ func (c *Controller) syncHandler(ctx context.Context, key string) error {
 		return err
 	}
 
-	if err := c.handleScheduler(ctx, cluster); err != nil {
+	scheduler, err := c.handleScheduler(ctx, cluster)
+	if err != nil {
 		return err
 	}
-	if err := c.handleWorker(ctx, cluster); err != nil {
+	if err := c.handleWorker(ctx, scheduler, cluster); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (c *Controller) handleScheduler(ctx context.Context, cluster *daskv1alpha1.Cluster) error {
+func (c *Controller) handleScheduler(ctx context.Context, cluster *daskv1alpha1.Cluster) (*corev1.Service, error) {
 	fieldManager := "dask-operator"
 	name := fmt.Sprintf("%s-scheduler", cluster.Name)
 
@@ -49,10 +51,10 @@ func (c *Controller) handleScheduler(ctx context.Context, cluster *daskv1alpha1.
 		service, err = c.kubeclient.CoreV1().Services(cluster.Namespace).Create(ctx, service, metav1.CreateOptions{})
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !metav1.IsControlledBy(service, cluster) {
-		return fmt.Errorf("service %s already exists, and is not owned by a cluster", name)
+		return nil, fmt.Errorf("service %s already exists, and is not owned by a cluster", name)
 	}
 	serviceAddress := fmt.Sprintf("%s.%s.svc", name, cluster.Namespace)
 
@@ -60,15 +62,15 @@ func (c *Controller) handleScheduler(ctx context.Context, cluster *daskv1alpha1.
 	if errors.IsNotFound(err) {
 		deployment, err = buildSchedulerDeployment(name, cluster)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		deployment, err = c.kubeclient.AppsV1().Deployments(cluster.Namespace).Create(ctx, deployment, metav1.CreateOptions{})
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !metav1.IsControlledBy(deployment, cluster) {
-		return fmt.Errorf("deployment %s already exists, and is not owned by a cluster", name)
+		return nil, fmt.Errorf("deployment %s already exists, and is not owned by a cluster", name)
 	}
 
 	ac := daskv1alpha1ac.Cluster(cluster.Name, cluster.Namespace).WithStatus(
@@ -79,16 +81,15 @@ func (c *Controller) handleScheduler(ctx context.Context, cluster *daskv1alpha1.
 	clusterClient := c.daskclient.DaskV1alpha1().Clusters(cluster.Namespace)
 	_, err = clusterClient.Apply(ctx, ac, metav1.ApplyOptions{FieldManager: fieldManager})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return nil
+	return service, nil
 }
 
-func (c *Controller) handleWorker(ctx context.Context, cluster *daskv1alpha1.Cluster) error {
+func (c *Controller) handleWorker(ctx context.Context, scheduler *corev1.Service, cluster *daskv1alpha1.Cluster) error {
 	fieldManager := "dask-operator"
 	name := fmt.Sprintf("%s-worker", cluster.Name)
-	schedulerName := fmt.Sprintf("%s-scheduler", cluster.Name)
 
 	pods, err := c.pods.Lister().Pods(cluster.Namespace).List(labels.SelectorFromSet(clusterLabels(cluster, "worker")))
 	if err != nil {
@@ -99,7 +100,7 @@ func (c *Controller) handleWorker(ctx context.Context, cluster *daskv1alpha1.Clu
 		podIds[pod.Name] = struct{}{}
 	}
 
-	pod, err := buildWorkerPod(name, schedulerName, cluster)
+	pod, err := buildWorkerPod(name, scheduler, cluster)
 	if err != nil {
 		return err
 	}

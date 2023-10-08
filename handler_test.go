@@ -142,12 +142,13 @@ func TestCreatesResources(t *testing.T) {
 		t.Fatalf("Error syncing cluster: %v", err)
 	}
 
+	expectedScheduler := buildSchedulerService("foo-scheduler", &cluster)
 	expectedDeployment, err := buildSchedulerDeployment("foo-scheduler", &cluster)
 	if err != nil {
 		t.Fatalf("unable to construct expected deployment: %s", err)
 	}
 
-	expectedPod, err := buildWorkerPod("foo-worker", "foo-scheduler", &cluster)
+	expectedPod, err := buildWorkerPod("foo-worker", expectedScheduler, &cluster)
 	if err != nil {
 		t.Fatalf("unable to construct expected worker pod: %s", err)
 	}
@@ -155,7 +156,7 @@ func TestCreatesResources(t *testing.T) {
 		k8stesting.NewCreateAction(
 			schema.GroupVersionResource{Resource: "services"},
 			cluster.Namespace,
-			buildSchedulerService("foo-scheduler", &cluster),
+			expectedScheduler,
 		),
 		k8stesting.NewCreateAction(
 			schema.GroupVersionResource{Group: "apps", Resource: "deployments"},
@@ -219,7 +220,10 @@ func TestIdle(t *testing.T) {
 
 	ownerRefs := []metav1.OwnerReference{*metav1.NewControllerRef(&cluster, daskv1alpha1.SchemeGroupVersion.WithKind("Cluster"))}
 	kubeObjects := []runtime.Object{
-		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "foo-scheduler", Namespace: "bar", OwnerReferences: ownerRefs}},
+		&corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: "foo-scheduler", Namespace: "bar", OwnerReferences: ownerRefs},
+			Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "tcp-comm", Port: 8786}}},
+		},
 		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "foo-scheduler", Namespace: "bar", OwnerReferences: ownerRefs}},
 		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{
 			Name:            "foo",
@@ -282,7 +286,10 @@ func TestRetiresPods(t *testing.T) {
 
 	ownerRefs := []metav1.OwnerReference{*metav1.NewControllerRef(&cluster, daskv1alpha1.SchemeGroupVersion.WithKind("Cluster"))}
 	kubeObjects := []runtime.Object{
-		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "foo-scheduler", Namespace: "bar", OwnerReferences: ownerRefs}},
+		&corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: "foo-scheduler", Namespace: "bar", OwnerReferences: ownerRefs},
+			Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "tcp-comm", Port: 8786}}},
+		},
 		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "foo-scheduler", Namespace: "bar", OwnerReferences: ownerRefs}},
 		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{
 			Name:            "foo",

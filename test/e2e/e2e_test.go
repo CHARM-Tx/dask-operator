@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/e2e-framework/klient/k8s"
 	"sigs.k8s.io/e2e-framework/klient/k8s/resources"
@@ -123,7 +124,7 @@ func TestKind(t *testing.T) {
 						Service: corev1.ServiceSpec{},
 					},
 					Worker: daskv1alpha1.WorkerSpec{
-						Replicas: 0,
+						Replicas: 1,
 						Template: corev1.PodTemplateSpec{
 							Spec: corev1.PodSpec{
 								Containers: []corev1.Container{
@@ -158,6 +159,25 @@ func TestKind(t *testing.T) {
 					deployment := object.(*appsv1.Deployment)
 					return deployment.Status.Replicas == 1
 				},
+			), wait.WithTimeout(time.Second*30))
+			return ctx
+		}).
+		Assess("Worker exists", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
+			client, err := cfg.NewClient()
+			if err != nil {
+				t.Fatal(err)
+			}
+			workerPods := corev1.PodList{}
+			wait.For(conditions.New(client.Resources()).ResourceListMatchN(
+				&workerPods, 1,
+				func(object k8s.Object) bool {
+					pod := object.(*corev1.Pod)
+					return pod.Status.Phase == "Running"
+				},
+				resources.WithLabelSelector(labels.FormatLabels(map[string]string{
+					"dask.charmtx.com/cluster": "foo",
+					"dask.charmtx.com/role":    "worker",
+				})),
 			), wait.WithTimeout(time.Second*30))
 			return ctx
 		}).Feature()

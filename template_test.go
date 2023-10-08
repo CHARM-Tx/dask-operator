@@ -42,8 +42,11 @@ func TestWorkerTemplate(t *testing.T) {
 			},
 		},
 	}
+	scheduler := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "foo-scheduler", Namespace: "bar"},
+		Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "tcp-comm", Port: 8786}}}}
 
-	worker, err := buildWorkerPod("foo", "foo-scheduler", &cluster)
+	worker, err := buildWorkerPod("foo", &scheduler, &cluster)
 	if err != nil {
 		t.Fatalf("failed to create pod: %s", err)
 	}
@@ -52,7 +55,7 @@ func TestWorkerTemplate(t *testing.T) {
 	for _, env := range worker.Spec.Containers[0].Env {
 		envVars[env.Name] = env.Value
 	}
-	if envVars["DASK_SCHEDULER_ADDRESS"] != "foo-scheduler.bar.svc" {
+	if envVars["DASK_SCHEDULER_ADDRESS"] != "foo-scheduler.bar.svc:8786" {
 		t.Errorf("incorrect scheduler address: %s", envVars["DASK_SCHEDULER_ADDRESS"])
 	}
 }
