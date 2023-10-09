@@ -120,6 +120,14 @@ func buildSchedulerService(name string, cluster *daskv1alpha1.Cluster) *corev1.S
 	labels := clusterLabels(cluster, "scheduler")
 
 	serviceSpec := cluster.Spec.Scheduler.Service.DeepCopy()
+	if serviceSpec.Selector == nil {
+		serviceSpec.Selector = labels
+	} else {
+		for k, v := range labels {
+			serviceSpec.Selector[k] = v
+		}
+	}
+
 	servicePorts := []corev1.ServicePort{
 		{Name: "tcp-comm", Port: 8786, TargetPort: intstr.FromString("tcp-comm"), Protocol: "TCP"},
 		{Name: "http-dashboard", Port: 8787, TargetPort: intstr.FromString("http-dashboard"), Protocol: "TCP"},

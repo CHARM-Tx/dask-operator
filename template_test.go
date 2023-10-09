@@ -1,11 +1,25 @@
 package main
 
 import (
+	"reflect"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+func TestSchedulerServiceTemplate(t *testing.T) {
+	cluster := makeCluster()
+
+	service := buildSchedulerService("foo-scheduler", &cluster)
+	selector := map[string]string{
+		"dask.charmtx.com/cluster": "foo",
+		"dask.charmtx.com/role":    "scheduler",
+	}
+	if !reflect.DeepEqual(service.Spec.Selector, selector) {
+		t.Errorf("Incorrect scheduler selector, got: %v", service.Spec.Selector)
+	}
+}
 
 func TestWorkerTemplate(t *testing.T) {
 	cluster := makeCluster()
