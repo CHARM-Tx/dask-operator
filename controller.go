@@ -93,6 +93,17 @@ func NewController(
 		},
 		DeleteFunc: controller.enqueueObject,
 	})
+	services.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: controller.enqueueObject,
+		UpdateFunc: func(old, new interface{}) {
+			oldService := old.(*corev1.Service)
+			newService := new.(*corev1.Service)
+			if oldService.ResourceVersion != newService.ResourceVersion {
+				controller.enqueueObject(newService)
+			}
+		},
+		DeleteFunc: controller.enqueueObject,
+	})
 	deployments.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: controller.enqueueObject,
 		UpdateFunc: func(old, new interface{}) {
@@ -236,6 +247,8 @@ func waitForSync(ctx context.Context, factory informerFactory) error {
 	for v, ok := range factory.WaitForCacheSync(ctx.Done()) {
 		if !ok {
 			return fmt.Errorf("cache failed to sync: %v", v)
+		} else {
+			klog.V(2).Infof("synced cache: %v", v)
 		}
 	}
 	return nil
