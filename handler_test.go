@@ -348,3 +348,101 @@ func TestRetiresPods(t *testing.T) {
 		t.Errorf("expected %d actions, got %d", len(expectedApiCalls), len(apiCalls))
 	}
 }
+
+func TestRepeatRetiresPods(t *testing.T) {
+	cluster := daskv1alpha1.Cluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "bar"},
+		Spec: daskv1alpha1.ClusterSpec{
+			Scheduler: daskv1alpha1.SchedulerSpec{
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:    "scheduler",
+								Image:   "ubuntu:22.04",
+								Command: []string{"dask", "scheduler"},
+							},
+						},
+					},
+				},
+				Service: corev1.ServiceSpec{},
+			},
+			Worker: daskv1alpha1.WorkerSpec{
+				Replicas: 0,
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:    "worker",
+								Image:   "ubuntu:22.04",
+								Command: []string{"dask", "worker"},
+							},
+						},
+					},
+				},
+			},
+		},
+		Status: daskv1alpha1.ClusterStatus{
+			Workers: daskv1alpha1.WorkerStatus{
+				Retiring: []daskv1alpha1.RetiredWorker{{Id: "foo"}}},
+		},
+	}
+
+	ownerRefs := []metav1.OwnerReference{*metav1.NewControllerRef(&cluster, daskv1alpha1.SchemeGroupVersion.WithKind("Cluster"))}
+	kubeObjects := []runtime.Object{
+		&corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: "foo-scheduler", Namespace: "bar", OwnerReferences: ownerRefs},
+			Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "tcp-comm", Port: 8786}}},
+		},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "foo-scheduler", Namespace: "bar", OwnerReferences: ownerRefs}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+			Name:            "foo",
+			Namespace:       "bar",
+			Labels:          clusterLabels(&cluster, "worker"),
+			OwnerReferences: ownerRefs,
+		}},
+	}
+	objects := []runtime.Object{&cluster}
+	f := newFixture(t, objects, kubeObjects)
+
+	_, ctx := ktesting.NewTestContext(t)
+	controller := f.newController(ctx, objects, kubeObjects)
+
+	if err := controller.syncHandler(ctx, getKey(&cluster, t)); err != nil {
+		t.Fatalf("Error syncing cluster: %v", err)
+	}
+
+	expectedActions := []k8stesting.Action{}
+	actions := filterActions(f.kubeclient.Actions())
+	if len(actions) != len(expectedActions) {
+		t.Errorf("expected %d actions, got %d", len(expectedActions), len(actions))
+	}
+
+	expectedDaskActions := []k8stesting.Action{
+		k8stesting.NewPatchAction(
+			schema.GroupVersionResource{Group: "dask.charmtx.com", Resource: "clusters"},
+			cluster.Namespace,
+			cluster.Name,
+			types.ApplyPatchType,
+			[]byte(""), // TODO: Check patch contents
+		),
+	}
+	daskActions := filterActions(f.client.Actions())
+	if len(daskActions) != len(expectedDaskActions) {
+		t.Errorf("expected %d dask actions, got %d", len(expectedDaskActions), len(daskActions))
+	}
+
+	for i, daskAction := range daskActions {
+		expectedDaskAction := expectedDaskActions[i]
+		if !(expectedDaskAction.Matches(daskAction.GetVerb(), daskAction.GetResource().Resource) && daskAction.GetSubresource() == expectedDaskAction.GetSubresource()) {
+			t.Errorf("dask action %v does not match expected dask action %v", daskAction, expectedDaskAction)
+		}
+	}
+
+	// Pod was already retired, so there should be no more calls to the retire function.
+	expectedApiCalls := [][]daskv1alpha1.RetiredWorker{}
+	apiCalls := f.schedulerclient.events
+	if len(expectedApiCalls) != len(apiCalls) {
+		t.Errorf("expected %d actions, got %d", len(expectedApiCalls), len(apiCalls))
+	}
+}
