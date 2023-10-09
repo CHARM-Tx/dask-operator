@@ -8,13 +8,14 @@ import (
 	"net/http"
 
 	daskv1alpha1 "github.com/CHARM-Tx/dask-operator/pkg/apis/dask/v1alpha1"
+	"k8s.io/klog/v2"
 )
 
 func schedulerUrl(cluster *daskv1alpha1.Cluster, path string) string {
-	return fmt.Sprintf("http://%s-scheduler.%s.svc/%s", cluster.Name, cluster.Namespace, path)
+	return fmt.Sprintf("http://%s-scheduler.%s.svc:8787/%s", cluster.Name, cluster.Namespace, path)
 }
 
-type RetireResult []struct{ id string }
+type RetireResult map[string]struct{ id string }
 
 type SchedulerClient interface {
 	retireWorkers(cluster *daskv1alpha1.Cluster, n int) (RetireResult, error)
@@ -44,7 +45,8 @@ func (c *HttpSchedulerClient) retireWorkers(cluster *daskv1alpha1.Cluster, n int
 		return nil, fmt.Errorf("error retiring workers: %s", body)
 	}
 
-	data := make([]struct{ id string }, n)
+	data := make(map[string]struct{ id string }, n)
+	klog.V(2).Infof("scheduler response: %s", body)
 	if err := json.Unmarshal(body, &data); err != nil {
 		return nil, err
 	}

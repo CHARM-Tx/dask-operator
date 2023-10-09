@@ -11,7 +11,7 @@ type SchedulerSpec struct {
 }
 
 type WorkerSpec struct {
-	Replicas int32              `json:"replicas,omitempty"`
+	Replicas int32              `json:"replicas"`
 	Template v1.PodTemplateSpec `json:"template,omitempty"`
 }
 
@@ -31,7 +31,7 @@ type RetiredWorker struct {
 }
 
 type WorkerStatus struct {
-	Replicas int32 `json:"count,omitempty"`
+	Replicas int32 `json:"count"`
 	// +listType=map
 	// +listMapKey=id
 	Retiring []RetiredWorker `json:"retiring,omitempty"`

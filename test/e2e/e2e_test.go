@@ -26,33 +26,59 @@ import (
 
 var testenv env.Environment
 
+type contextKey string
+
 func TestMain(m *testing.M) {
-	namespace := envconf.RandomName("dask-operator", 16)
 	cfg := envconf.NewWithKubeConfig("./kubeconfig.yaml")
 	testenv = env.NewWithConfig(cfg)
 
-	testenv.Setup(
-		envfuncs.SetupCRDs("../../config/crd", "*"),
-		envfuncs.CreateNamespace(namespace),
-	)
+	testenv.Setup(envfuncs.SetupCRDs("../../config/crd", "*"))
 
-	testenv.Finish(
-		envfuncs.DeleteNamespace(namespace),
-		envfuncs.TeardownCRDs("../../config/crd", "*"),
-	)
+	testenv.Finish(envfuncs.TeardownCRDs("../../config/crd", "*"))
 	os.Exit(testenv.Run(m))
 }
+
+func createNamespace(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
+	namespaceName := envconf.RandomName("dask-operator", 20)
+	client, err := cfg.NewClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	namespace := corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespaceName}}
+	if err := client.Resources().Create(ctx, &namespace); err != nil {
+		t.Fatal(err)
+	}
+
+	return context.WithValue(ctx, contextKey("namespace"), &namespace)
+}
+
+func deleteNamespace(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
+	client, err := cfg.NewClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	namespace := ctx.Value(contextKey("namespace")).(*corev1.Namespace)
+	if err := client.Resources().Delete(ctx, namespace); err != nil {
+		t.Fatal(err)
+	}
+	return ctx
+}
+
 func deployOperator(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
 	client, err := cfg.NewClient()
 	if err != nil {
 		t.Fatal(err)
 	}
+	namespace := ctx.Value(contextKey("namespace")).(*corev1.Namespace)
+
 	labels := map[string]string{"app": "dask-controller"}
 	serviceAccount := corev1.ServiceAccount{
-		ObjectMeta: metav1.ObjectMeta{Name: "dask-controller", Namespace: cfg.Namespace()},
+		ObjectMeta: metav1.ObjectMeta{Name: "dask-controller", Namespace: namespace.Name},
 	}
 	deployment := appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{Name: "dask-controller", Namespace: cfg.Namespace()},
+		ObjectMeta: metav1.ObjectMeta{Name: "dask-controller", Namespace: namespace.Name},
 		Spec: appsv1.DeploymentSpec{
 			Selector: &metav1.LabelSelector{MatchLabels: labels},
 			Replicas: pointer.Int32(1),
@@ -63,7 +89,7 @@ func deployOperator(ctx context.Context, t *testing.T, cfg *envconf.Config) cont
 					Containers: []corev1.Container{{
 						Name:            "operator",
 						Image:           "dask-operator:latest",
-						Args:            []string{fmt.Sprintf("--namespace=%s", cfg.Namespace())},
+						Args:            []string{fmt.Sprintf("--namespace=%s", namespace.Name)},
 						ImagePullPolicy: "IfNotPresent",
 					}},
 				},
@@ -71,7 +97,7 @@ func deployOperator(ctx context.Context, t *testing.T, cfg *envconf.Config) cont
 		},
 	}
 	role := rbacv1.Role{
-		ObjectMeta: metav1.ObjectMeta{Name: "dask-controller", Namespace: cfg.Namespace()},
+		ObjectMeta: metav1.ObjectMeta{Name: "dask-controller", Namespace: namespace.Name},
 		Rules: []rbacv1.PolicyRule{
 			{APIGroups: []string{""}, Resources: []string{"pods", "services"}, Verbs: []string{"*"}},
 			{APIGroups: []string{"apps"}, Resources: []string{"deployments"}, Verbs: []string{"*"}},
@@ -79,7 +105,7 @@ func deployOperator(ctx context.Context, t *testing.T, cfg *envconf.Config) cont
 		},
 	}
 	roleBinding := rbacv1.RoleBinding{
-		ObjectMeta: metav1.ObjectMeta{Name: "dask-controller", Namespace: cfg.Namespace()},
+		ObjectMeta: metav1.ObjectMeta{Name: "dask-controller", Namespace: namespace.Name},
 		RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "Role", Name: role.Name},
 		Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Name: serviceAccount.Name, Namespace: serviceAccount.Namespace}},
 	}
@@ -98,14 +124,20 @@ func deployOperator(ctx context.Context, t *testing.T, cfg *envconf.Config) cont
 	), wait.WithTimeout(time.Second*10))
 	return ctx
 }
+
 func makeCluster(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
 	r, err := resources.New(cfg.Client().RESTConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
 	daskv1alpha1.AddToScheme(r.GetScheme())
+
+	namespace := ctx.Value(contextKey("namespace")).(*corev1.Namespace)
 	cluster := daskv1alpha1.Cluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: cfg.Namespace()},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      envconf.RandomName("test", 10),
+			Namespace: namespace.Name,
+		},
 		Spec: daskv1alpha1.ClusterSpec{
 			Scheduler: daskv1alpha1.SchedulerSpec{
 				Template: corev1.PodTemplateSpec{
@@ -147,11 +179,13 @@ func makeCluster(ctx context.Context, t *testing.T, cfg *envconf.Config) context
 	if err := r.Create(ctx, &cluster); err != nil {
 		t.Fatal(err)
 	}
-	return ctx
+	return context.WithValue(ctx, contextKey("cluster"), &cluster)
 }
 
 func TestKind(t *testing.T) {
-	feat := features.New("Create Dask cluster").
+	createsCluster := features.New("Create Dask cluster").
+		WithSetup("Create namespace", createNamespace).
+		WithTeardown("Delete namespace", deleteNamespace).
 		WithSetup("Deploy controller", deployOperator).
 		WithSetup("Create cluster", makeCluster).
 		Assess("Scheduler exists", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
@@ -159,15 +193,15 @@ func TestKind(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			schedulerDeployment := appsv1.Deployment{
-				ObjectMeta: metav1.ObjectMeta{Name: "foo-scheduler", Namespace: cfg.Namespace()},
-			}
-			wait.For(conditions.New(client.Resources()).ResourceMatch(
-				&schedulerDeployment,
+			namespace := ctx.Value(contextKey("namespace")).(*corev1.Namespace)
+			schedulerDeployments := appsv1.DeploymentList{}
+			wait.For(conditions.New(client.Resources()).ResourceListMatchN(
+				&schedulerDeployments, 1,
 				func(object k8s.Object) bool {
 					deployment := object.(*appsv1.Deployment)
 					return deployment.Status.Replicas == 1
 				},
+				resources.WithFieldSelector(labels.FormatLabels(map[string]string{"metadata.namespace": namespace.Name})),
 			), wait.WithTimeout(time.Second*30))
 			return ctx
 		}).
@@ -176,6 +210,9 @@ func TestKind(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			namespace := ctx.Value(contextKey("namespace")).(*corev1.Namespace)
+			cluster := ctx.Value(contextKey("cluster")).(*daskv1alpha1.Cluster)
+
 			workerPods := corev1.PodList{}
 			err = wait.For(conditions.New(client.Resources()).ResourceListMatchN(
 				&workerPods, 1,
@@ -192,9 +229,10 @@ func TestKind(t *testing.T) {
 					return false
 				},
 				resources.WithLabelSelector(labels.FormatLabels(map[string]string{
-					"dask.charmtx.com/cluster": "foo",
+					"dask.charmtx.com/cluster": cluster.Name,
 					"dask.charmtx.com/role":    "worker",
 				})),
+				resources.WithFieldSelector(labels.FormatLabels(map[string]string{"metadata.namespace": namespace.Name})),
 			), wait.WithTimeout(time.Second*60))
 
 			if err != nil {
@@ -203,5 +241,57 @@ func TestKind(t *testing.T) {
 			return ctx
 		}).Feature()
 
-	testenv.Test(t, feat)
+	scalesDownCluster := features.New("Scales down Dask cluster").
+		WithSetup("Create namespace", createNamespace).
+		WithTeardown("Delete namespace", deleteNamespace).
+		WithSetup("Deploy controller", deployOperator).
+		WithSetup("Create cluster", makeCluster).
+		Assess("Worker deleted", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
+			r, err := resources.New(cfg.Client().RESTConfig())
+			if err != nil {
+				t.Fatal(err)
+			}
+			daskv1alpha1.AddToScheme(r.GetScheme())
+
+			namespace := ctx.Value(contextKey("namespace")).(*corev1.Namespace)
+			cluster := ctx.Value(contextKey("cluster")).(*daskv1alpha1.Cluster)
+
+			workerPods := corev1.PodList{}
+			err = wait.For(conditions.New(r).ResourceListMatchN(
+				&workerPods, 1,
+				func(object k8s.Object) bool {
+					pod := object.(*corev1.Pod)
+					if pod.Status.Phase != "Running" {
+						return false
+					}
+					for _, c := range pod.Status.Conditions {
+						if c.Type == "Ready" && c.Status == "True" {
+							return true
+						}
+					}
+					return false
+				},
+				resources.WithLabelSelector(labels.FormatLabels(map[string]string{
+					"dask.charmtx.com/cluster": cluster.Name,
+					"dask.charmtx.com/role":    "worker",
+				})),
+				resources.WithFieldSelector(labels.FormatLabels(map[string]string{"metadata.namespace": namespace.Name})),
+			), wait.WithTimeout(time.Second*120))
+			if err != nil {
+				t.Errorf("error waiting for worker pod: %s", err)
+			}
+
+			newCluster := cluster.DeepCopy()
+			newCluster.Spec.Workers.Replicas = 0
+			if err := r.Update(ctx, newCluster); err != nil {
+				t.Fatalf("failed to scale down: %s", err)
+			}
+			err = wait.For(conditions.New(r).ResourceDeleted(&workerPods.Items[0]), wait.WithTimeout(time.Second*10))
+			if err != nil {
+				t.Errorf("error waiting for worker pod deletion: %s", err)
+			}
+			return ctx
+		}).Feature()
+
+	testenv.TestInParallel(t, createsCluster, scalesDownCluster)
 }

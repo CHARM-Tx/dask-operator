@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	daskv1alpha1 "github.com/CHARM-Tx/dask-operator/pkg/apis/dask/v1alpha1"
@@ -23,9 +24,9 @@ type fakeSchedulerClient struct {
 }
 
 func (c *fakeSchedulerClient) retireWorkers(cluster *daskv1alpha1.Cluster, n int) (RetireResult, error) {
-	retiredWorkers := make(RetireResult, 0, n)
+	retiredWorkers := make(RetireResult, n)
 	for i := 0; i < n; i++ {
-		retiredWorkers = append(retiredWorkers, struct{ id string }{id: "foo"})
+		retiredWorkers[fmt.Sprintf("worker-%d", i)] = struct{ id string }{id: "foo"}
 	}
 	c.events = append(c.events, retiredWorkers)
 	return retiredWorkers, nil

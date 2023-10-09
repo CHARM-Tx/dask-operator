@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/klog/v2"
 )
 
 func (c *Controller) syncHandler(ctx context.Context, key string) error {
@@ -115,11 +116,13 @@ func (c *Controller) handleWorker(ctx context.Context, scheduler *corev1.Service
 
 	desiredPods := int(cluster.Spec.Workers.Replicas) - len(pods) + len(cluster.Status.Workers.Retiring)
 	if desiredPods > 0 {
+		klog.Infof("creating %d workers in cluster: %s/%s", desiredPods, cluster.Namespace, cluster.Name)
 		for i := 0; i < desiredPods; i++ {
 			// TODO: Some sort of rate limiting or sanity check
 			c.kubeclient.CoreV1().Pods(cluster.Namespace).Create(ctx, pod, metav1.CreateOptions{})
 		}
 	} else if desiredPods < 0 {
+		klog.Infof("retiring %d workers in cluster: %s/%s", -desiredPods, cluster.Namespace, cluster.Name)
 		retirings, err := c.scheduler.retireWorkers(cluster, -desiredPods)
 		if err != nil {
 			return err
@@ -132,6 +135,7 @@ func (c *Controller) handleWorker(ctx context.Context, scheduler *corev1.Service
 			)
 		}
 	} else {
+		klog.V(2).Infof("correct number of workers present for cluster %s/%s", cluster.Namespace, cluster.Name)
 		return nil
 	}
 

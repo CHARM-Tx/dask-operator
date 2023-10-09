@@ -162,6 +162,7 @@ func buildWorkerPod(name string, scheduler *corev1.Service, cluster *daskv1alpha
 	podTemplate.ObjectMeta.OwnerReferences = []metav1.OwnerReference{
 		*metav1.NewControllerRef(cluster, daskv1alpha1.SchemeGroupVersion.WithKind("Cluster")),
 	}
+	podTemplate.Spec.RestartPolicy = corev1.RestartPolicyOnFailure
 
 	workerContainer := getByKey(podTemplate.Spec.Containers, func(c corev1.Container) string { return c.Name }, "worker")
 	if workerContainer == nil {
