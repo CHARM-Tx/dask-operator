@@ -45,17 +45,21 @@ func NewController(
 	kubeclient kubernetes.Interface,
 	daskclient clientset.Interface,
 	schedulerclient SchedulerClient,
+	namespace string,
 	ctx context.Context,
 ) *Controller {
 	logger := klog.FromContext(ctx)
 
-	daskInformerFactory := daskinformers.NewSharedInformerFactory(daskclient, 0*time.Second)
+	daskInformerFactory := daskinformers.NewSharedInformerFactoryWithOptions(
+		daskclient, 0*time.Second, daskinformers.WithNamespace(namespace),
+	)
 	kubeInformerFactory := k8sinformers.NewSharedInformerFactoryWithOptions(
 		kubeclient,
 		0*time.Second,
 		k8sinformers.WithTweakListOptions(func(opts *metav1.ListOptions) {
 			opts.LabelSelector = fmt.Sprintf("%s/cluster", dask.GroupName)
 		}),
+		k8sinformers.WithNamespace(namespace),
 	)
 	pods := kubeInformerFactory.Core().V1().Pods()
 	services := kubeInformerFactory.Core().V1().Services()

@@ -50,7 +50,7 @@ func newFixture(t *testing.T, objects []runtime.Object, kubeObjects []runtime.Ob
 }
 
 func (f *fixture) newController(ctx context.Context, objects, kubeObjects []runtime.Object) *Controller {
-	controller := NewController(f.kubeclient, f.client, f.schedulerclient, ctx)
+	controller := NewController(f.kubeclient, f.client, f.schedulerclient, "", ctx)
 	for _, o := range objects {
 		switch o := o.(type) {
 		case *daskv1alpha1.Cluster:

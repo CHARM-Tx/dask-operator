@@ -16,10 +16,13 @@ import (
 
 	"github.com/CHARM-Tx/dask-operator/pkg/generated/clientset"
 	flag "github.com/spf13/pflag"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 )
+
+var namespace = flag.String("namespace", corev1.NamespaceAll, "The namespace to watch (default: all namespaces)")
 
 func init() {
 	klog.InitFlags(nil)
@@ -63,6 +66,6 @@ func main() {
 	schedulerClient := &HttpSchedulerClient{httpclient: http.Client{}}
 
 	ctx := signalContext()
-	controller := NewController(kubeclient, client, schedulerClient, ctx)
+	controller := NewController(kubeclient, client, schedulerClient, *namespace, ctx)
 	controller.Run(1, context.Background())
 }
