@@ -97,8 +97,8 @@ func filterActions(actions []k8stesting.Action) []k8stesting.Action {
 	return filteredActions
 }
 
-func TestCreatesResources(t *testing.T) {
-	cluster := daskv1alpha1.Cluster{
+func makeCluster() daskv1alpha1.Cluster {
+	return daskv1alpha1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "bar"},
 		Spec: daskv1alpha1.ClusterSpec{
 			Scheduler: daskv1alpha1.SchedulerSpec{
@@ -107,7 +107,7 @@ func TestCreatesResources(t *testing.T) {
 						Containers: []corev1.Container{
 							{
 								Name:    "scheduler",
-								Image:   "ubuntu:22.04",
+								Image:   "ghcr.io/dask/dask:latest",
 								Command: []string{"dask", "scheduler"},
 							},
 						},
@@ -116,13 +116,13 @@ func TestCreatesResources(t *testing.T) {
 				Service: corev1.ServiceSpec{},
 			},
 			Worker: daskv1alpha1.WorkerSpec{
-				Replicas: 1,
+				Replicas: 0,
 				Template: corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
 							{
 								Name:    "worker",
-								Image:   "ubuntu:22.04",
+								Image:   "ghcr.io/dask/dask:latest",
 								Command: []string{"dask", "worker"},
 							},
 						},
@@ -131,6 +131,11 @@ func TestCreatesResources(t *testing.T) {
 			},
 		},
 	}
+}
+
+func TestCreatesResources(t *testing.T) {
+	cluster := makeCluster()
+	cluster.Spec.Worker.Replicas = 1
 	kubeObjects := []runtime.Object{}
 	objects := []runtime.Object{&cluster}
 	f := newFixture(t, objects, kubeObjects)
@@ -184,39 +189,8 @@ func TestCreatesResources(t *testing.T) {
 }
 
 func TestIdle(t *testing.T) {
-	cluster := daskv1alpha1.Cluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "bar"},
-		Spec: daskv1alpha1.ClusterSpec{
-			Scheduler: daskv1alpha1.SchedulerSpec{
-				Template: corev1.PodTemplateSpec{
-					Spec: corev1.PodSpec{
-						Containers: []corev1.Container{
-							{
-								Name:    "scheduler",
-								Image:   "ubuntu:22.04",
-								Command: []string{"dask", "scheduler"},
-							},
-						},
-					},
-				},
-				Service: corev1.ServiceSpec{},
-			},
-			Worker: daskv1alpha1.WorkerSpec{
-				Replicas: 1,
-				Template: corev1.PodTemplateSpec{
-					Spec: corev1.PodSpec{
-						Containers: []corev1.Container{
-							{
-								Name:    "worker",
-								Image:   "ubuntu:22.04",
-								Command: []string{"dask", "worker"},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
+	cluster := makeCluster()
+	cluster.Spec.Worker.Replicas = 1
 
 	ownerRefs := []metav1.OwnerReference{*metav1.NewControllerRef(&cluster, daskv1alpha1.SchemeGroupVersion.WithKind("Cluster"))}
 	kubeObjects := []runtime.Object{
@@ -250,39 +224,7 @@ func TestIdle(t *testing.T) {
 }
 
 func TestRetiresPods(t *testing.T) {
-	cluster := daskv1alpha1.Cluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "bar"},
-		Spec: daskv1alpha1.ClusterSpec{
-			Scheduler: daskv1alpha1.SchedulerSpec{
-				Template: corev1.PodTemplateSpec{
-					Spec: corev1.PodSpec{
-						Containers: []corev1.Container{
-							{
-								Name:    "scheduler",
-								Image:   "ubuntu:22.04",
-								Command: []string{"dask", "scheduler"},
-							},
-						},
-					},
-				},
-				Service: corev1.ServiceSpec{},
-			},
-			Worker: daskv1alpha1.WorkerSpec{
-				Replicas: 0,
-				Template: corev1.PodTemplateSpec{
-					Spec: corev1.PodSpec{
-						Containers: []corev1.Container{
-							{
-								Name:    "worker",
-								Image:   "ubuntu:22.04",
-								Command: []string{"dask", "worker"},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
+	cluster := makeCluster()
 
 	ownerRefs := []metav1.OwnerReference{*metav1.NewControllerRef(&cluster, daskv1alpha1.SchemeGroupVersion.WithKind("Cluster"))}
 	kubeObjects := []runtime.Object{
@@ -350,42 +292,10 @@ func TestRetiresPods(t *testing.T) {
 }
 
 func TestRepeatRetiresPods(t *testing.T) {
-	cluster := daskv1alpha1.Cluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "bar"},
-		Spec: daskv1alpha1.ClusterSpec{
-			Scheduler: daskv1alpha1.SchedulerSpec{
-				Template: corev1.PodTemplateSpec{
-					Spec: corev1.PodSpec{
-						Containers: []corev1.Container{
-							{
-								Name:    "scheduler",
-								Image:   "ubuntu:22.04",
-								Command: []string{"dask", "scheduler"},
-							},
-						},
-					},
-				},
-				Service: corev1.ServiceSpec{},
-			},
-			Worker: daskv1alpha1.WorkerSpec{
-				Replicas: 0,
-				Template: corev1.PodTemplateSpec{
-					Spec: corev1.PodSpec{
-						Containers: []corev1.Container{
-							{
-								Name:    "worker",
-								Image:   "ubuntu:22.04",
-								Command: []string{"dask", "worker"},
-							},
-						},
-					},
-				},
-			},
-		},
-		Status: daskv1alpha1.ClusterStatus{
-			Workers: daskv1alpha1.WorkerStatus{
-				Retiring: []daskv1alpha1.RetiredWorker{{Id: "foo"}}},
-		},
+	cluster := makeCluster()
+	cluster.Status = daskv1alpha1.ClusterStatus{
+		Workers: daskv1alpha1.WorkerStatus{
+			Retiring: []daskv1alpha1.RetiredWorker{{Id: "foo"}}},
 	}
 
 	ownerRefs := []metav1.OwnerReference{*metav1.NewControllerRef(&cluster, daskv1alpha1.SchemeGroupVersion.WithKind("Cluster"))}

@@ -3,48 +3,16 @@ package main
 import (
 	"testing"
 
-	daskv1alpha1 "github.com/CHARM-Tx/dask-operator/pkg/apis/dask/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestWorkerTemplate(t *testing.T) {
-	cluster := daskv1alpha1.Cluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "bar"},
-		Spec: daskv1alpha1.ClusterSpec{
-			Scheduler: daskv1alpha1.SchedulerSpec{
-				Template: corev1.PodTemplateSpec{
-					Spec: corev1.PodSpec{
-						Containers: []corev1.Container{
-							{
-								Name:    "scheduler",
-								Image:   "ubuntu:22.04",
-								Command: []string{"dask", "scheduler"},
-							},
-						},
-					},
-				},
-				Service: corev1.ServiceSpec{},
-			},
-			Worker: daskv1alpha1.WorkerSpec{
-				Replicas: 1,
-				Template: corev1.PodTemplateSpec{
-					Spec: corev1.PodSpec{
-						Containers: []corev1.Container{
-							{
-								Name:    "worker",
-								Image:   "ubuntu:22.04",
-								Command: []string{"dask", "worker"},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
+	cluster := makeCluster()
 	scheduler := corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{Name: "foo-scheduler", Namespace: "bar"},
-		Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "tcp-comm", Port: 8786}}}}
+		Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "tcp-comm", Port: 8786}}},
+	}
 
 	worker, err := buildWorkerPod("foo", &scheduler, &cluster)
 	if err != nil {
