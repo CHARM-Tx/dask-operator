@@ -19,13 +19,13 @@ import (
 )
 
 type fakeSchedulerClient struct {
-	events [][]daskv1alpha1.RetiredWorker
+	events []RetireResult
 }
 
-func (c *fakeSchedulerClient) retireWorkers(cluster *daskv1alpha1.Cluster, n int) ([]daskv1alpha1.RetiredWorker, error) {
-	retiredWorkers := make([]daskv1alpha1.RetiredWorker, 0, n)
+func (c *fakeSchedulerClient) retireWorkers(cluster *daskv1alpha1.Cluster, n int) (RetireResult, error) {
+	retiredWorkers := make(RetireResult, 0, n)
 	for i := 0; i < n; i++ {
-		retiredWorkers = append(retiredWorkers, daskv1alpha1.RetiredWorker{Id: "foo"})
+		retiredWorkers = append(retiredWorkers, struct{ id string }{id: "foo"})
 	}
 	c.events = append(c.events, retiredWorkers)
 	return retiredWorkers, nil
@@ -45,7 +45,7 @@ func newFixture(t *testing.T, objects []runtime.Object, kubeObjects []runtime.Ob
 
 		kubeclient:      k8sfake.NewSimpleClientset(kubeObjects...),
 		client:          fake.NewSimpleClientset(objects...),
-		schedulerclient: &fakeSchedulerClient{events: make([][]daskv1alpha1.RetiredWorker, 0)},
+		schedulerclient: &fakeSchedulerClient{events: make([]RetireResult, 0)},
 	}
 }
 

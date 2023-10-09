@@ -14,15 +14,17 @@ func schedulerUrl(cluster *daskv1alpha1.Cluster, path string) string {
 	return fmt.Sprintf("http://%s-scheduler.%s.svc/%s", cluster.Name, cluster.Namespace, path)
 }
 
+type RetireResult []struct{ id string }
+
 type SchedulerClient interface {
-	retireWorkers(cluster *daskv1alpha1.Cluster, n int) ([]daskv1alpha1.RetiredWorker, error)
+	retireWorkers(cluster *daskv1alpha1.Cluster, n int) (RetireResult, error)
 }
 
 type HttpSchedulerClient struct {
 	httpclient http.Client
 }
 
-func (c *HttpSchedulerClient) retireWorkers(cluster *daskv1alpha1.Cluster, n int) ([]daskv1alpha1.RetiredWorker, error) {
+func (c *HttpSchedulerClient) retireWorkers(cluster *daskv1alpha1.Cluster, n int) (RetireResult, error) {
 	params, err := json.Marshal(map[string]interface{}{"n": n})
 	if err != nil {
 		return nil, err
@@ -42,7 +44,7 @@ func (c *HttpSchedulerClient) retireWorkers(cluster *daskv1alpha1.Cluster, n int
 		return nil, fmt.Errorf("error retiring workers: %s", body)
 	}
 
-	data := make([]daskv1alpha1.RetiredWorker, n)
+	data := make([]struct{ id string }, n)
 	if err := json.Unmarshal(body, &data); err != nil {
 		return nil, err
 	}

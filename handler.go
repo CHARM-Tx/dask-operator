@@ -126,7 +126,10 @@ func (c *Controller) handleWorker(ctx context.Context, scheduler *corev1.Service
 		}
 
 		for _, retiring := range retirings {
-			status.WithRetiring(daskv1alpha1ac.RetiredWorker().WithId(retiring.Id))
+			status.WithRetiring(daskv1alpha1ac.RetiredWorker().
+				WithId(retiring.id).
+				WithTime(metav1.Now()),
+			)
 		}
 	} else {
 		return nil

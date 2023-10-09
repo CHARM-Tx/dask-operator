@@ -26,6 +26,8 @@ type SchedulerStatus struct {
 
 type RetiredWorker struct {
 	Id string `json:"id,omitEmpty"`
+	// The time the pod was retired, so we can kill it if it takes too long.
+	Time metav1.Time `json:"time,omitEmpty"`
 }
 
 type WorkerStatus struct {
