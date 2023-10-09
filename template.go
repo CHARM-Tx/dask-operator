@@ -150,7 +150,7 @@ func buildWorkerPod(name string, scheduler *corev1.Service, cluster *daskv1alpha
 	if schedulerPort == nil {
 		return nil, fmt.Errorf("scheduler service has no port \"tcp-comm\"")
 	}
-	podTemplate := cluster.Spec.Worker.Template.DeepCopy()
+	podTemplate := cluster.Spec.Workers.Template.DeepCopy()
 	podTemplate.ObjectMeta.GenerateName = fmt.Sprintf("%s-", name)
 	if podTemplate.ObjectMeta.Labels == nil {
 		podTemplate.ObjectMeta.Labels = clusterLabels(cluster, "worker")

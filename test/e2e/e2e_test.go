@@ -122,7 +122,7 @@ func makeCluster(ctx context.Context, t *testing.T, cfg *envconf.Config) context
 				},
 				Service: corev1.ServiceSpec{},
 			},
-			Worker: daskv1alpha1.WorkerSpec{
+			Workers: daskv1alpha1.WorkerSpec{
 				Replicas: 1,
 				Template: corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{

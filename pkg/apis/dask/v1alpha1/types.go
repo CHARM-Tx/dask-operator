@@ -17,7 +17,7 @@ type WorkerSpec struct {
 
 type ClusterSpec struct {
 	Scheduler SchedulerSpec `json:"scheduler,omitempty"`
-	Worker    WorkerSpec    `json:"worker,omitempty"`
+	Workers   WorkerSpec    `json:"workers,omitempty"`
 }
 
 type SchedulerStatus struct {
@@ -31,7 +31,7 @@ type RetiredWorker struct {
 }
 
 type WorkerStatus struct {
-	Count int32 `json:"count,omitempty"`
+	Replicas int32 `json:"count,omitempty"`
 	// +listType=map
 	// +listMapKey=id
 	Retiring []RetiredWorker `json:"retiring,omitempty"`
@@ -43,6 +43,8 @@ type ClusterStatus struct {
 }
 
 // +genclient
+// +kubebuilder:subresource:status
+// +kubebuilder:subresource:scale:specpath=.spec.workers.replicas,statuspath=.status.workers.count
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type Cluster struct {
 	metav1.TypeMeta   `json:",inline"`

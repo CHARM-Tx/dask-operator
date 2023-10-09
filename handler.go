@@ -105,7 +105,7 @@ func (c *Controller) handleWorker(ctx context.Context, scheduler *corev1.Service
 		return err
 	}
 
-	status := daskv1alpha1ac.WorkerStatus().WithCount(int32(len(pods)))
+	status := daskv1alpha1ac.WorkerStatus().WithReplicas(int32(len(pods)))
 	for _, retiringPod := range cluster.Status.Workers.Retiring {
 		if _, ok := podIds[retiringPod.Id]; ok {
 			// This pod hasn't terminated yet, keep tracking it in the retiring list
@@ -113,7 +113,7 @@ func (c *Controller) handleWorker(ctx context.Context, scheduler *corev1.Service
 		}
 	}
 
-	desiredPods := int(cluster.Spec.Worker.Replicas) - len(pods) + len(cluster.Status.Workers.Retiring)
+	desiredPods := int(cluster.Spec.Workers.Replicas) - len(pods) + len(cluster.Status.Workers.Retiring)
 	if desiredPods > 0 {
 		for i := 0; i < desiredPods; i++ {
 			// TODO: Some sort of rate limiting or sanity check

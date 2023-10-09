@@ -115,7 +115,7 @@ func makeCluster() daskv1alpha1.Cluster {
 				},
 				Service: corev1.ServiceSpec{},
 			},
-			Worker: daskv1alpha1.WorkerSpec{
+			Workers: daskv1alpha1.WorkerSpec{
 				Replicas: 0,
 				Template: corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
@@ -135,7 +135,7 @@ func makeCluster() daskv1alpha1.Cluster {
 
 func TestCreatesResources(t *testing.T) {
 	cluster := makeCluster()
-	cluster.Spec.Worker.Replicas = 1
+	cluster.Spec.Workers.Replicas = 1
 	kubeObjects := []runtime.Object{}
 	objects := []runtime.Object{&cluster}
 	f := newFixture(t, objects, kubeObjects)
@@ -190,7 +190,7 @@ func TestCreatesResources(t *testing.T) {
 
 func TestIdle(t *testing.T) {
 	cluster := makeCluster()
-	cluster.Spec.Worker.Replicas = 1
+	cluster.Spec.Workers.Replicas = 1
 
 	ownerRefs := []metav1.OwnerReference{*metav1.NewControllerRef(&cluster, daskv1alpha1.SchemeGroupVersion.WithKind("Cluster"))}
 	kubeObjects := []runtime.Object{
