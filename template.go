@@ -168,18 +168,26 @@ func buildWorkerPod(name string, scheduler *corev1.Service, cluster *daskv1alpha
 		return nil, fmt.Errorf("worker template has no container named 'worker'")
 	}
 	podPorts := []corev1.ContainerPort{
-		{Name: "http-dashboard", ContainerPort: 8787, Protocol: "TCP"},
+		{Name: "tcp-comm", ContainerPort: 9000, Protocol: "TCP"},
+		{Name: "http-dashboard", ContainerPort: 9001, Protocol: "TCP"},
 	}
 	workerContainer.Ports = replaceByName(podPorts, workerContainer.Ports, func(p corev1.ContainerPort) string { return p.Name })
 	podEnv := []corev1.EnvVar{
+		{
+			Name:  "DASK_SCHEDULER_ADDRESS",
+			Value: fmt.Sprintf("tcp://%s.%s.svc:%d", scheduler.Name, cluster.Namespace, schedulerPort.Port),
+		},
+		// TODO: These fields must be explicitly used by the CLI worker spec. Should we inject them automatically?
 		{
 			Name:      "DASK_WORKER_NAME",
 			ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"}},
 		},
 		{
-			Name:  "DASK_SCHEDULER_ADDRESS",
-			Value: fmt.Sprintf("%s.%s.svc:%d", scheduler.Name, cluster.Namespace, schedulerPort.Port),
+			Name:      "DASK_WORKER_ADDRESS",
+			ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "status.podIP"}},
 		},
+		{Name: "DASK_WORKER_PORT", Value: "9000"},
+		{Name: "DASK_DASHBOARD_PORT", Value: "9001"},
 	}
 	workerContainer.Env = replaceByName(podEnv, workerContainer.Env, func(p corev1.EnvVar) string { return p.Name })
 	addProbes(workerContainer)

@@ -37,7 +37,7 @@ func TestWorkerTemplate(t *testing.T) {
 	for _, env := range worker.Spec.Containers[0].Env {
 		envVars[env.Name] = env.Value
 	}
-	if envVars["DASK_SCHEDULER_ADDRESS"] != "foo-scheduler.bar.svc:8786" {
+	if envVars["DASK_SCHEDULER_ADDRESS"] != "tcp://foo-scheduler.bar.svc:8786" {
 		t.Errorf("incorrect scheduler address: %s", envVars["DASK_SCHEDULER_ADDRESS"])
 	}
 }

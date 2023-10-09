@@ -128,9 +128,14 @@ func makeCluster(ctx context.Context, t *testing.T, cfg *envconf.Config) context
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{
 							{
-								Name:            "worker",
-								Image:           "ghcr.io/dask/dask:latest",
-								Command:         []string{"dask", "worker"},
+								Name:  "worker",
+								Image: "ghcr.io/dask/dask:latest",
+								Command: []string{
+									"dask", "worker", "--no-nanny",
+									"--name=$(DASK_WORKER_NAME)",
+									"--listen-address=tcp://$(DASK_WORKER_ADDRESS):$(DASK_WORKER_PORT)",
+									"--dashboard-address=$(DASK_WORKER_ADDRESS):$(DASK_DASHBOARD_PORT)",
+								},
 								ImagePullPolicy: "IfNotPresent",
 							},
 						},
@@ -172,17 +177,29 @@ func TestKind(t *testing.T) {
 				t.Fatal(err)
 			}
 			workerPods := corev1.PodList{}
-			wait.For(conditions.New(client.Resources()).ResourceListMatchN(
+			err = wait.For(conditions.New(client.Resources()).ResourceListMatchN(
 				&workerPods, 1,
 				func(object k8s.Object) bool {
 					pod := object.(*corev1.Pod)
-					return pod.Status.Phase == "Running"
+					if pod.Status.Phase != "Running" {
+						return false
+					}
+					for _, c := range pod.Status.Conditions {
+						if c.Type == "Ready" && c.Status == "True" {
+							return true
+						}
+					}
+					return false
 				},
 				resources.WithLabelSelector(labels.FormatLabels(map[string]string{
 					"dask.charmtx.com/cluster": "foo",
 					"dask.charmtx.com/role":    "worker",
 				})),
-			), wait.WithTimeout(time.Second*30))
+			), wait.WithTimeout(time.Second*60))
+
+			if err != nil {
+				t.Errorf("error waiting for worker pod: %s", err)
+			}
 			return ctx
 		}).Feature()
 
