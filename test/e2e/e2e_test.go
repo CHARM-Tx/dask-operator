@@ -182,6 +182,19 @@ func makeCluster(ctx context.Context, t *testing.T, cfg *envconf.Config) context
 	return context.WithValue(ctx, contextKey("cluster"), &cluster)
 }
 
+func workerReady(object k8s.Object) bool {
+	pod := object.(*corev1.Pod)
+	if pod.Status.Phase != "Running" {
+		return false
+	}
+	for _, c := range pod.Status.Conditions {
+		if c.Type == "Ready" && c.Status == "True" {
+			return true
+		}
+	}
+	return false
+}
+
 func TestKind(t *testing.T) {
 	createsCluster := features.New("Create Dask cluster").
 		WithSetup("Create namespace", createNamespace).
@@ -215,19 +228,7 @@ func TestKind(t *testing.T) {
 
 			workerPods := corev1.PodList{}
 			err = wait.For(conditions.New(client.Resources()).ResourceListMatchN(
-				&workerPods, 1,
-				func(object k8s.Object) bool {
-					pod := object.(*corev1.Pod)
-					if pod.Status.Phase != "Running" {
-						return false
-					}
-					for _, c := range pod.Status.Conditions {
-						if c.Type == "Ready" && c.Status == "True" {
-							return true
-						}
-					}
-					return false
-				},
+				&workerPods, 1, workerReady,
 				resources.WithLabelSelector(labels.FormatLabels(map[string]string{
 					"dask.charmtx.com/cluster": cluster.Name,
 					"dask.charmtx.com/role":    "worker",
@@ -258,19 +259,7 @@ func TestKind(t *testing.T) {
 
 			workerPods := corev1.PodList{}
 			err = wait.For(conditions.New(r).ResourceListMatchN(
-				&workerPods, 1,
-				func(object k8s.Object) bool {
-					pod := object.(*corev1.Pod)
-					if pod.Status.Phase != "Running" {
-						return false
-					}
-					for _, c := range pod.Status.Conditions {
-						if c.Type == "Ready" && c.Status == "True" {
-							return true
-						}
-					}
-					return false
-				},
+				&workerPods, 1, workerReady,
 				resources.WithLabelSelector(labels.FormatLabels(map[string]string{
 					"dask.charmtx.com/cluster": cluster.Name,
 					"dask.charmtx.com/role":    "worker",
@@ -281,11 +270,16 @@ func TestKind(t *testing.T) {
 				t.Errorf("error waiting for worker pod: %s", err)
 			}
 
-			newCluster := cluster.DeepCopy()
+			newCluster := &daskv1alpha1.Cluster{}
+			if err := r.Get(ctx, cluster.Name, cluster.Namespace, newCluster); err != nil {
+				t.Errorf("failed to get cluster for update: %s", err)
+			}
+
 			newCluster.Spec.Workers.Replicas = 0
 			if err := r.Update(ctx, newCluster); err != nil {
 				t.Fatalf("failed to scale down: %s", err)
 			}
+
 			err = wait.For(conditions.New(r).ResourceDeleted(&workerPods.Items[0]), wait.WithTimeout(time.Second*10))
 			if err != nil {
 				t.Errorf("error waiting for worker pod deletion: %s", err)
@@ -293,5 +287,65 @@ func TestKind(t *testing.T) {
 			return ctx
 		}).Feature()
 
-	testenv.TestInParallel(t, createsCluster, scalesDownCluster)
+	replacesPod := features.New("Replaces deleted pods").
+		WithSetup("Create namespace", createNamespace).
+		WithTeardown("Delete namespace", deleteNamespace).
+		WithSetup("Deploy controller", deployOperator).
+		WithSetup("Create cluster", makeCluster).
+		WithSetup("Delete worker", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
+			r, err := resources.New(cfg.Client().RESTConfig())
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			namespace := ctx.Value(contextKey("namespace")).(*corev1.Namespace)
+			cluster := ctx.Value(contextKey("cluster")).(*daskv1alpha1.Cluster)
+			workerPods := corev1.PodList{}
+			err = wait.For(conditions.New(r).ResourceListMatchN(
+				&workerPods, 1, workerReady,
+				resources.WithLabelSelector(labels.FormatLabels(map[string]string{
+					"dask.charmtx.com/cluster": cluster.Name,
+					"dask.charmtx.com/role":    "worker",
+				})),
+				resources.WithFieldSelector(labels.FormatLabels(map[string]string{"metadata.namespace": namespace.Name})),
+			))
+			if err != nil {
+				t.Errorf("error waiting for worker pod: %s", err)
+			}
+
+			err = r.Delete(ctx, &workerPods.Items[0])
+			if err != nil {
+				t.Errorf("error deleting pod: %s", err)
+			}
+			err = wait.For(conditions.New(r).ResourceDeleted(&workerPods.Items[0]), wait.WithTimeout(time.Second*10))
+			if err != nil {
+				t.Errorf("error waiting for worker pod deletion: %s", err)
+			}
+
+			return ctx
+		}).
+		Assess("Worker replaced", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
+			r, err := resources.New(cfg.Client().RESTConfig())
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			namespace := ctx.Value(contextKey("namespace")).(*corev1.Namespace)
+			cluster := ctx.Value(contextKey("cluster")).(*daskv1alpha1.Cluster)
+			workerPods := corev1.PodList{}
+			err = wait.For(conditions.New(r).ResourceListMatchN(
+				&workerPods, 1, workerReady,
+				resources.WithLabelSelector(labels.FormatLabels(map[string]string{
+					"dask.charmtx.com/cluster": cluster.Name,
+					"dask.charmtx.com/role":    "worker",
+				})),
+				resources.WithFieldSelector(labels.FormatLabels(map[string]string{"metadata.namespace": namespace.Name})),
+			))
+			if err != nil {
+				t.Errorf("error waiting for worker pod: %s", err)
+			}
+			return ctx
+		}).Feature()
+
+	testenv.TestInParallel(t, createsCluster, scalesDownCluster, replacesPod)
 }
