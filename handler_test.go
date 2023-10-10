@@ -195,10 +195,16 @@ func TestIdle(t *testing.T) {
 	ownerRefs := []metav1.OwnerReference{*metav1.NewControllerRef(&cluster, daskv1alpha1.SchemeGroupVersion.WithKind("Cluster"))}
 	kubeObjects := []runtime.Object{
 		&corev1.Service{
-			ObjectMeta: metav1.ObjectMeta{Name: "foo-scheduler", Namespace: "bar", OwnerReferences: ownerRefs},
-			Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "tcp-comm", Port: 8786}}},
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "foo-scheduler", Namespace: "bar", OwnerReferences: ownerRefs,
+				Labels: clusterLabels(&cluster, "scheduler"),
+			},
+			Spec: corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "tcp-comm", Port: 8786}}},
 		},
-		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "foo-scheduler", Namespace: "bar", OwnerReferences: ownerRefs}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{
+			Name: "foo-scheduler", Namespace: "bar", OwnerReferences: ownerRefs,
+			Labels: clusterLabels(&cluster, "scheduler"),
+		}},
 		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{
 			Name:            "foo",
 			Namespace:       "bar",
@@ -229,10 +235,16 @@ func TestRetiresPods(t *testing.T) {
 	ownerRefs := []metav1.OwnerReference{*metav1.NewControllerRef(&cluster, daskv1alpha1.SchemeGroupVersion.WithKind("Cluster"))}
 	kubeObjects := []runtime.Object{
 		&corev1.Service{
-			ObjectMeta: metav1.ObjectMeta{Name: "foo-scheduler", Namespace: "bar", OwnerReferences: ownerRefs},
-			Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "tcp-comm", Port: 8786}}},
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "foo-scheduler", Namespace: "bar", OwnerReferences: ownerRefs,
+				Labels: clusterLabels(&cluster, "scheduler"),
+			},
+			Spec: corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "tcp-comm", Port: 8786}}},
 		},
-		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "foo-scheduler", Namespace: "bar", OwnerReferences: ownerRefs}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{
+			Name: "foo-scheduler", Namespace: "bar", OwnerReferences: ownerRefs,
+			Labels: clusterLabels(&cluster, "scheduler"),
+		}},
 		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{
 			Name:            "foo",
 			Namespace:       "bar",
@@ -281,10 +293,16 @@ func TestRepeatRetiresPods(t *testing.T) {
 	ownerRefs := []metav1.OwnerReference{*metav1.NewControllerRef(&cluster, daskv1alpha1.SchemeGroupVersion.WithKind("Cluster"))}
 	kubeObjects := []runtime.Object{
 		&corev1.Service{
-			ObjectMeta: metav1.ObjectMeta{Name: "foo-scheduler", Namespace: "bar", OwnerReferences: ownerRefs},
-			Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "tcp-comm", Port: 8786}}},
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "foo-scheduler", Namespace: "bar", OwnerReferences: ownerRefs,
+				Labels: clusterLabels(&cluster, "scheduler"),
+			},
+			Spec: corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "tcp-comm", Port: 8786}}},
 		},
-		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "foo-scheduler", Namespace: "bar", OwnerReferences: ownerRefs}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{
+			Name: "foo-scheduler", Namespace: "bar", OwnerReferences: ownerRefs,
+			Labels: clusterLabels(&cluster, "scheduler"),
+		}},
 		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{
 			Name:            "foo",
 			Namespace:       "bar",
