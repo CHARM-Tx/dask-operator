@@ -12,7 +12,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
@@ -257,32 +256,12 @@ func TestRetiresPods(t *testing.T) {
 		t.Errorf("expected %d actions, got %d", len(expectedActions), len(actions))
 	}
 
-	expectedDaskActions := []k8stesting.Action{
-		k8stesting.NewPatchAction(
-			schema.GroupVersionResource{Group: "dask.charmtx.com", Resource: "clusters"},
-			cluster.Namespace,
-			cluster.Name,
-			types.ApplyPatchType,
-			[]byte(""), // TODO: Check patch contents
-		),
-		k8stesting.NewPatchAction(
-			schema.GroupVersionResource{Group: "dask.charmtx.com", Resource: "clusters"},
-			cluster.Namespace,
-			cluster.Name,
-			types.ApplyPatchType,
-			[]byte(""), // TODO: Check patch contents
-		),
+	newCluster, err := controller.daskclient.DaskV1alpha1().Clusters(cluster.Namespace).Get(ctx, cluster.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Errorf("error getting updated cluster: %s", err)
 	}
-	daskActions := filterActions(f.client.Actions())
-	if len(daskActions) != len(expectedDaskActions) {
-		t.Errorf("expected %d dask actions, got %d", len(expectedDaskActions), len(daskActions))
-	}
-
-	for i, daskAction := range daskActions {
-		expectedDaskAction := expectedDaskActions[i]
-		if !(expectedDaskAction.Matches(daskAction.GetVerb(), daskAction.GetResource().Resource) && daskAction.GetSubresource() == expectedDaskAction.GetSubresource()) {
-			t.Errorf("dask action %v does not match expected dask action %v", daskAction, expectedDaskAction)
-		}
+	if len(newCluster.Status.Workers.Retiring) != 1 {
+		t.Errorf("expected to see 1 retiring worker, got %d", len(newCluster.Status.Workers.Retiring))
 	}
 
 	expectedApiCalls := [][]daskv1alpha1.RetiredWorker{{{Id: "foo"}}}
@@ -329,25 +308,12 @@ func TestRepeatRetiresPods(t *testing.T) {
 		t.Errorf("expected %d actions, got %d", len(expectedActions), len(actions))
 	}
 
-	expectedDaskActions := []k8stesting.Action{
-		k8stesting.NewPatchAction(
-			schema.GroupVersionResource{Group: "dask.charmtx.com", Resource: "clusters"},
-			cluster.Namespace,
-			cluster.Name,
-			types.ApplyPatchType,
-			[]byte(""), // TODO: Check patch contents
-		),
+	newCluster, err := controller.daskclient.DaskV1alpha1().Clusters(cluster.Namespace).Get(ctx, cluster.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Errorf("error getting updated cluster: %s", err)
 	}
-	daskActions := filterActions(f.client.Actions())
-	if len(daskActions) != len(expectedDaskActions) {
-		t.Errorf("expected %d dask actions, got %d", len(expectedDaskActions), len(daskActions))
-	}
-
-	for i, daskAction := range daskActions {
-		expectedDaskAction := expectedDaskActions[i]
-		if !(expectedDaskAction.Matches(daskAction.GetVerb(), daskAction.GetResource().Resource) && daskAction.GetSubresource() == expectedDaskAction.GetSubresource()) {
-			t.Errorf("dask action %v does not match expected dask action %v", daskAction, expectedDaskAction)
-		}
+	if len(newCluster.Status.Workers.Retiring) != 1 {
+		t.Errorf("expected to see 1 retiring worker, got %d", len(newCluster.Status.Workers.Retiring))
 	}
 
 	// Pod was already retired, so there should be no more calls to the retire function.
