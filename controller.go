@@ -149,7 +149,7 @@ func (c *Controller) enqueueObject(obj interface{}) {
 	if ownerRef == nil {
 		return
 	}
-	if schema.FromAPIVersionAndKind(ownerRef.APIVersion, ownerRef.Kind) == daskv1alpha1.SchemeGroupVersion.WithKind("Cluster") {
+	if schema.FromAPIVersionAndKind(ownerRef.APIVersion, ownerRef.Kind) != daskv1alpha1.SchemeGroupVersion.WithKind("Cluster") {
 		return
 	}
 

@@ -141,7 +141,6 @@ func (c *Controller) handleWorker(ctx context.Context, scheduler *corev1.Service
 		}
 	} else {
 		klog.V(2).Infof("correct number of workers present for cluster %s/%s", cluster.Namespace, cluster.Name)
-		return nil
 	}
 
 	ac := daskv1alpha1ac.Cluster(cluster.Name, cluster.Namespace).WithStatus(
