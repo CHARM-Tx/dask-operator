@@ -18,11 +18,12 @@ import (
 	flag "github.com/spf13/pflag"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 )
 
 var namespace = flag.String("namespace", corev1.NamespaceAll, "The namespace to watch (default: all namespaces)")
+var kubeconfig = flag.String("kubeconfig", "", "Explicit path to a kubeconfig file")
 
 func init() {
 	klog.InitFlags(nil)
@@ -48,7 +49,7 @@ func signalContext() context.Context {
 func main() {
 	flag.Parse()
 
-	config, err := rest.InClusterConfig()
+	config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
 	if err != nil {
 		panic(err.Error())
 	}
