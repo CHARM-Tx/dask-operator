@@ -89,6 +89,10 @@ func (c *Controller) handleScheduler(ctx context.Context, cluster *daskv1alpha1.
 	return service, nil
 }
 
+func isCompleted(status corev1.PodStatus) bool {
+	return (status.Phase == corev1.PodFailed) || (status.Phase == corev1.PodSucceeded)
+}
+
 func (c *Controller) handleWorker(ctx context.Context, scheduler *corev1.Service, cluster *daskv1alpha1.Cluster) error {
 	fieldManager := "dask-operator-worker"
 	name := fmt.Sprintf("%s-worker", cluster.Name)
@@ -97,10 +101,17 @@ func (c *Controller) handleWorker(ctx context.Context, scheduler *corev1.Service
 	if err != nil {
 		return err
 	}
+
 	klog.V(1).Infof("found %d pods for cluster %s/%s", len(pods), cluster.Namespace, cluster.Name)
 	podIds := make(map[string]struct{}, len(pods))
 	for _, pod := range pods {
 		podIds[pod.Name] = struct{}{}
+		if isCompleted(pod.Status) {
+			err := c.kubeclient.CoreV1().Pods(pod.Namespace).Delete(ctx, pod.Name, metav1.DeleteOptions{})
+			if err != nil {
+				return err
+			}
+		}
 	}
 
 	pod, err := buildWorkerPod(name, scheduler, cluster)
