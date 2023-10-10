@@ -28,7 +28,8 @@ jobs:
             K8S_CODEGEN_VERSION=${{ env.K8S_CODEGEN_VERSION }}
             CONTROLLER_GEN_VERSION=${{ env.CONTROLLER_GEN_VERSION }}
       - name: Create kind cluster
-        run: kind create cluster
+        run: |
+          kind create cluster --config test/e2e/kind.yaml --kubeconfig test/e2e/kubeconfig.yaml
       - name: Load operator images
         run: |
           docker pull ghcr.io/dask/dask:latest
