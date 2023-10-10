@@ -101,7 +101,7 @@ func deployOperator(ctx context.Context, t *testing.T, cfg *envconf.Config) cont
 		Rules: []rbacv1.PolicyRule{
 			{APIGroups: []string{""}, Resources: []string{"pods", "services"}, Verbs: []string{"*"}},
 			{APIGroups: []string{"apps"}, Resources: []string{"deployments"}, Verbs: []string{"*"}},
-			{APIGroups: []string{"dask.charmtx.com"}, Resources: []string{"clusters"}, Verbs: []string{"*"}},
+			{APIGroups: []string{"dask.charmtx.com"}, Resources: []string{"clusters", "clusters/status", "clusters/scale"}, Verbs: []string{"*"}},
 		},
 	}
 	roleBinding := rbacv1.RoleBinding{

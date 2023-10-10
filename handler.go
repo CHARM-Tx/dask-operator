@@ -31,6 +31,7 @@ func (c *Controller) syncHandler(ctx context.Context, key string) error {
 		return err
 	}
 
+	klog.V(1).Infof("syncing cluster %s/%s", namespace, name)
 	scheduler, err := c.handleScheduler(ctx, cluster)
 	if err != nil {
 		return err
@@ -43,7 +44,7 @@ func (c *Controller) syncHandler(ctx context.Context, key string) error {
 }
 
 func (c *Controller) handleScheduler(ctx context.Context, cluster *daskv1alpha1.Cluster) (*corev1.Service, error) {
-	fieldManager := "dask-operator"
+	fieldManager := "dask-operator-scheduler"
 	name := fmt.Sprintf("%s-scheduler", cluster.Name)
 
 	service, err := c.services.Lister().Services(cluster.Namespace).Get(name)
@@ -80,7 +81,7 @@ func (c *Controller) handleScheduler(ctx context.Context, cluster *daskv1alpha1.
 		),
 	)
 	clusterClient := c.daskclient.DaskV1alpha1().Clusters(cluster.Namespace)
-	_, err = clusterClient.Apply(ctx, ac, metav1.ApplyOptions{FieldManager: fieldManager})
+	_, err = clusterClient.ApplyStatus(ctx, ac, metav1.ApplyOptions{FieldManager: fieldManager, Force: true})
 	if err != nil {
 		return nil, err
 	}
@@ -89,13 +90,14 @@ func (c *Controller) handleScheduler(ctx context.Context, cluster *daskv1alpha1.
 }
 
 func (c *Controller) handleWorker(ctx context.Context, scheduler *corev1.Service, cluster *daskv1alpha1.Cluster) error {
-	fieldManager := "dask-operator"
+	fieldManager := "dask-operator-worker"
 	name := fmt.Sprintf("%s-worker", cluster.Name)
 
 	pods, err := c.pods.Lister().Pods(cluster.Namespace).List(labels.SelectorFromSet(clusterLabels(cluster, "worker")))
 	if err != nil {
 		return err
 	}
+	klog.V(1).Infof("found %d pods for cluster %s/%s", len(pods), cluster.Namespace, cluster.Name)
 	podIds := make(map[string]struct{}, len(pods))
 	for _, pod := range pods {
 		podIds[pod.Name] = struct{}{}
@@ -109,8 +111,11 @@ func (c *Controller) handleWorker(ctx context.Context, scheduler *corev1.Service
 	status := daskv1alpha1ac.WorkerStatus().WithReplicas(int32(len(pods)))
 	for _, retiringPod := range cluster.Status.Workers.Retiring {
 		if _, ok := podIds[retiringPod.Id]; ok {
+			klog.V(1).Infof("waiting for pod %s to retire in cluster %s/%s", retiringPod.Id, cluster.Namespace, cluster.Name)
 			// This pod hasn't terminated yet, keep tracking it in the retiring list
 			status.WithRetiring(daskv1alpha1ac.RetiredWorker().WithId(retiringPod.Id))
+		} else {
+			klog.V(2).Infof("pod %s has retired in cluster %s/%s", retiringPod.Id, cluster.Namespace, cluster.Name)
 		}
 	}
 
@@ -143,7 +148,7 @@ func (c *Controller) handleWorker(ctx context.Context, scheduler *corev1.Service
 		daskv1alpha1ac.ClusterStatus().WithWorkers(status),
 	)
 	clusterClient := c.daskclient.DaskV1alpha1().Clusters(cluster.Namespace)
-	_, err = clusterClient.Apply(ctx, ac, metav1.ApplyOptions{FieldManager: fieldManager})
+	_, err = clusterClient.ApplyStatus(ctx, ac, metav1.ApplyOptions{FieldManager: fieldManager, Force: true})
 	if err != nil {
 		return err
 	}
