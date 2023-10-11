@@ -15,7 +15,9 @@ func schedulerUrl(cluster *daskv1alpha1.Cluster, path string) string {
 	return fmt.Sprintf("http://%s-scheduler.%s.svc:8787/%s", cluster.Name, cluster.Namespace, path)
 }
 
-type RetireResult map[string]struct{ id string }
+type RetireResult map[string]struct {
+	Id string `json:"id"`
+}
 
 type SchedulerClient interface {
 	retireWorkers(cluster *daskv1alpha1.Cluster, n int) (RetireResult, error)
@@ -45,7 +47,7 @@ func (c *HttpSchedulerClient) retireWorkers(cluster *daskv1alpha1.Cluster, n int
 		return nil, fmt.Errorf("error retiring workers: %s", body)
 	}
 
-	data := make(map[string]struct{ id string }, n)
+	data := make(RetireResult, n)
 	klog.V(2).Infof("scheduler response: %s", body)
 	if err := json.Unmarshal(body, &data); err != nil {
 		return nil, err

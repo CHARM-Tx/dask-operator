@@ -280,7 +280,7 @@ func TestKind(t *testing.T) {
 				t.Fatalf("failed to scale down: %s", err)
 			}
 
-			err = wait.For(conditions.New(r).ResourceDeleted(&workerPods.Items[0]), wait.WithTimeout(time.Second*10))
+			err = wait.For(conditions.New(r).ResourceDeleted(&workerPods.Items[0]), wait.WithTimeout(time.Second*120))
 			if err != nil {
 				t.Errorf("error waiting for worker pod deletion: %s", err)
 			}

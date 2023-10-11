@@ -124,13 +124,16 @@ func (c *Controller) handleWorker(ctx context.Context, scheduler *corev1.Service
 		if _, ok := podIds[retiringPod.Id]; ok {
 			klog.V(1).Infof("waiting for pod %s to retire in cluster %s/%s", retiringPod.Id, cluster.Namespace, cluster.Name)
 			// This pod hasn't terminated yet, keep tracking it in the retiring list
-			status.WithRetiring(daskv1alpha1ac.RetiredWorker().WithId(retiringPod.Id))
+			status.WithRetiring(daskv1alpha1ac.RetiredWorker().
+				WithId(retiringPod.Id).
+				WithTime(retiringPod.Time),
+			)
 		} else {
 			klog.V(2).Infof("pod %s has retired in cluster %s/%s", retiringPod.Id, cluster.Namespace, cluster.Name)
 		}
 	}
 
-	desiredPods := int(cluster.Spec.Workers.Replicas) - len(pods) + len(cluster.Status.Workers.Retiring)
+	desiredPods := int(cluster.Spec.Workers.Replicas) - len(pods) + len(status.Retiring)
 	if desiredPods > 0 {
 		klog.Infof("creating %d workers in cluster: %s/%s", desiredPods, cluster.Namespace, cluster.Name)
 		for i := 0; i < desiredPods; i++ {
@@ -146,7 +149,7 @@ func (c *Controller) handleWorker(ctx context.Context, scheduler *corev1.Service
 
 		for _, retiring := range retirings {
 			status.WithRetiring(daskv1alpha1ac.RetiredWorker().
-				WithId(retiring.id).
+				WithId(retiring.Id).
 				WithTime(metav1.Now()),
 			)
 		}

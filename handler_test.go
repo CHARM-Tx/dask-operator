@@ -25,7 +25,9 @@ type fakeSchedulerClient struct {
 func (c *fakeSchedulerClient) retireWorkers(cluster *daskv1alpha1.Cluster, n int) (RetireResult, error) {
 	retiredWorkers := make(RetireResult, n)
 	for i := 0; i < n; i++ {
-		retiredWorkers[fmt.Sprintf("worker-%d", i)] = struct{ id string }{id: "foo"}
+		retiredWorkers[fmt.Sprintf("worker-%d", i)] = struct {
+			Id string `json:"id"`
+		}{Id: "foo"}
 	}
 	c.events = append(c.events, retiredWorkers)
 	return retiredWorkers, nil
