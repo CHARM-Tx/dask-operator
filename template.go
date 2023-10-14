@@ -91,7 +91,7 @@ func buildSchedulerDeployment(name string, cluster *daskv1alpha1.Cluster) (*apps
 		{
 			// The scheduler API is disabled by default, see https://github.com/dask/distributed/issues/6407
 			Name:  "DASK_DISTRIBUTED__SCHEDULER__HTTP__ROUTES",
-			Value: "['distributed.http.scheduler.api','distributed.http.health']",
+			Value: "['distributed.http.scheduler.api','distributed.http.health','distributed.http.statics','distributed.http.scheduler.prometheus']",
 		},
 	}
 	schedulerContainer.Env = replaceByName(podEnv, schedulerContainer.Env, func(p corev1.EnvVar) string { return p.Name })
