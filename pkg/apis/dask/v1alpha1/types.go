@@ -32,6 +32,8 @@ type RetiredWorker struct {
 
 type WorkerStatus struct {
 	Replicas int32 `json:"count"`
+	// To support the horizontal pod autoscaler
+	Selector string `json:"selector,omitEmpty"`
 	// +listType=map
 	// +listMapKey=id
 	Retiring []RetiredWorker `json:"retiring,omitempty"`
@@ -44,7 +46,7 @@ type ClusterStatus struct {
 
 // +genclient
 // +kubebuilder:subresource:status
-// +kubebuilder:subresource:scale:specpath=.spec.workers.replicas,statuspath=.status.workers.count
+// +kubebuilder:subresource:scale:specpath=.spec.workers.replicas,statuspath=.status.workers.count,selectorpath=.status.workers.selector
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type Cluster struct {
 	metav1.TypeMeta   `json:",inline"`
