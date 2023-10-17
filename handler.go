@@ -140,6 +140,7 @@ func (c *Controller) handleWorker(ctx context.Context, scheduler *corev1.Service
 		}
 	}
 
+	retiringError := error(nil)
 	desiredPods := int(cluster.Spec.Workers.Replicas) - len(pods) + len(status.Retiring)
 	if desiredPods > 0 {
 		klog.Infof("creating %d workers in cluster: %s/%s", desiredPods, cluster.Namespace, cluster.Name)
@@ -160,6 +161,11 @@ func (c *Controller) handleWorker(ctx context.Context, scheduler *corev1.Service
 				WithTime(metav1.Now()),
 			)
 		}
+
+		if len(retirings) < -desiredPods {
+			// We can't immediately exit, because we must still update the count of retiring pods
+			retiringError = fmt.Errorf("only retired %d/%d pods for cluster %s/%s", len(retirings), -desiredPods, cluster.Namespace, cluster.Name)
+		}
 	} else {
 		klog.V(2).Infof("correct number of workers present for cluster %s/%s", cluster.Namespace, cluster.Name)
 	}
@@ -173,5 +179,5 @@ func (c *Controller) handleWorker(ctx context.Context, scheduler *corev1.Service
 		return err
 	}
 
-	return nil
+	return retiringError
 }

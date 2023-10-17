@@ -19,12 +19,18 @@ import (
 )
 
 type fakeSchedulerClient struct {
-	events []RetireResult
+	maxRetired int
+	events     []RetireResult
 }
 
 func (c *fakeSchedulerClient) retireWorkers(cluster *daskv1alpha1.Cluster, n int) (RetireResult, error) {
 	retiredWorkers := make(RetireResult, n)
-	for i := 0; i < n; i++ {
+	end := n
+	if c.maxRetired >= 0 {
+		end = c.maxRetired
+	}
+
+	for i := 0; i < end; i++ {
 		retiredWorkers[fmt.Sprintf("worker-%d", i)] = struct {
 			Id string `json:"id"`
 		}{Id: "foo"}
@@ -47,7 +53,7 @@ func newFixture(t *testing.T, objects []runtime.Object, kubeObjects []runtime.Ob
 
 		kubeclient:      k8sfake.NewSimpleClientset(kubeObjects...),
 		client:          fake.NewSimpleClientset(objects...),
-		schedulerclient: &fakeSchedulerClient{events: make([]RetireResult, 0)},
+		schedulerclient: &fakeSchedulerClient{maxRetired: -1, events: make([]RetireResult, 0)},
 	}
 }
 
@@ -338,6 +344,67 @@ func TestRepeatRetiresPods(t *testing.T) {
 
 	// Pod was already retired, so there should be no more calls to the retire function.
 	expectedApiCalls := [][]daskv1alpha1.RetiredWorker{}
+	apiCalls := f.schedulerclient.events
+	if len(expectedApiCalls) != len(apiCalls) {
+		t.Errorf("expected %d actions, got %d", len(expectedApiCalls), len(apiCalls))
+	}
+}
+
+func TestParitallyRetiresPods(t *testing.T) {
+	cluster := makeCluster()
+
+	ownerRefs := []metav1.OwnerReference{*metav1.NewControllerRef(&cluster, daskv1alpha1.SchemeGroupVersion.WithKind("Cluster"))}
+	kubeObjects := []runtime.Object{
+		&corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "foo-scheduler", Namespace: "bar", OwnerReferences: ownerRefs,
+				Labels: clusterLabels(&cluster, "scheduler"),
+			},
+			Spec: corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "tcp-comm", Port: 8786}}},
+		},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{
+			Name: "foo-scheduler", Namespace: "bar", OwnerReferences: ownerRefs,
+			Labels: clusterLabels(&cluster, "scheduler"),
+		}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+			Name:            "foo-1",
+			Namespace:       "bar",
+			Labels:          clusterLabels(&cluster, "worker"),
+			OwnerReferences: ownerRefs,
+		}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+			Name:            "foo-2",
+			Namespace:       "bar",
+			Labels:          clusterLabels(&cluster, "worker"),
+			OwnerReferences: ownerRefs,
+		}},
+	}
+	objects := []runtime.Object{&cluster}
+	f := newFixture(t, objects, kubeObjects)
+	f.schedulerclient.maxRetired = 1
+
+	_, ctx := ktesting.NewTestContext(t)
+	controller := f.newController(ctx, objects, kubeObjects)
+
+	if err := controller.syncHandler(ctx, getKey(&cluster, t)); err == nil {
+		t.Errorf("Expected error due to failure to retire, got nil")
+	}
+
+	expectedActions := []k8stesting.Action{}
+	actions := filterActions(f.kubeclient.Actions())
+	if len(actions) != len(expectedActions) {
+		t.Errorf("expected %d actions, got %d", len(expectedActions), len(actions))
+	}
+
+	newCluster, err := controller.daskclient.DaskV1alpha1().Clusters(cluster.Namespace).Get(ctx, cluster.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Errorf("error getting updated cluster: %s", err)
+	}
+	if len(newCluster.Status.Workers.Retiring) != 1 {
+		t.Errorf("expected to see 1 retiring workers, got %d", len(newCluster.Status.Workers.Retiring))
+	}
+
+	expectedApiCalls := [][]daskv1alpha1.RetiredWorker{{{Id: "foo"}}}
 	apiCalls := f.schedulerclient.events
 	if len(expectedApiCalls) != len(apiCalls) {
 		t.Errorf("expected %d actions, got %d", len(expectedApiCalls), len(apiCalls))
