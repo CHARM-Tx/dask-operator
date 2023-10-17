@@ -1,3 +1,6 @@
+// This file contains the logic required to interact with the Dask API. This is
+// required for graceful scaling down, workers can be retired without losing
+// data stored in them.
 package main
 
 import (

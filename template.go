@@ -1,3 +1,6 @@
+// This file contains all of the template rendering code, which injects required
+// configuration (e.g. env vars) into the templates provided by the cluster
+// configuration.
 package main
 
 import (

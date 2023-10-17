@@ -1,3 +1,6 @@
+// This file contains the main business logic of the handler. Any changes to
+// watched resources trigger `syncHandler`, which reconciles the cluster state
+// with the dependent objects.
 package main
 
 import (

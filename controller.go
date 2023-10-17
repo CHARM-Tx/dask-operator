@@ -1,3 +1,6 @@
+// This file contains the standard kubernetes boilerplate, very similar to the
+// sample controller. It sets up watches on all of the resources we care about,
+// and calls `syncHandler` whenever anything interesting happens.
 package main
 
 import (
