@@ -127,6 +127,7 @@ func NewController(
 				controller.enqueueCluster(newCluster)
 			}
 		},
+		DeleteFunc: controller.enqueueCluster,
 	})
 
 	return controller
