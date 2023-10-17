@@ -247,14 +247,11 @@ func TestKind(t *testing.T) {
 		WithTeardown("Delete namespace", deleteNamespace).
 		WithSetup("Deploy controller", deployOperator).
 		WithSetup("Create cluster", makeCluster).
-		Assess("Worker deleted", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
+		WithSetup("Wait for worker", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
 			r, err := resources.New(cfg.Client().RESTConfig())
 			if err != nil {
 				t.Fatal(err)
 			}
-			daskv1alpha1.AddToScheme(r.GetScheme())
-
-			namespace := ctx.Value(contextKey("namespace")).(*corev1.Namespace)
 			cluster := ctx.Value(contextKey("cluster")).(*daskv1alpha1.Cluster)
 
 			workerPods := corev1.PodList{}
@@ -264,11 +261,23 @@ func TestKind(t *testing.T) {
 					"dask.charmtx.com/cluster": cluster.Name,
 					"dask.charmtx.com/role":    "worker",
 				})),
-				resources.WithFieldSelector(labels.FormatLabels(map[string]string{"metadata.namespace": namespace.Name})),
+				resources.WithFieldSelector(labels.FormatLabels(map[string]string{"metadata.namespace": cluster.Namespace})),
 			), wait.WithTimeout(time.Second*120))
 			if err != nil {
 				t.Errorf("error waiting for worker pod: %s", err)
 			}
+
+			return context.WithValue(ctx, contextKey("worker"), &workerPods.Items[0])
+		}).
+		Assess("Worker deleted", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
+			r, err := resources.New(cfg.Client().RESTConfig())
+			if err != nil {
+				t.Fatal(err)
+			}
+			daskv1alpha1.AddToScheme(r.GetScheme())
+
+			cluster := ctx.Value(contextKey("cluster")).(*daskv1alpha1.Cluster)
+			worker := ctx.Value(contextKey("worker")).(*corev1.Pod)
 
 			newCluster := &daskv1alpha1.Cluster{}
 			if err := r.Get(ctx, cluster.Name, cluster.Namespace, newCluster); err != nil {
@@ -280,7 +289,7 @@ func TestKind(t *testing.T) {
 				t.Fatalf("failed to scale down: %s", err)
 			}
 
-			err = wait.For(conditions.New(r).ResourceDeleted(&workerPods.Items[0]), wait.WithTimeout(time.Second*120))
+			err = wait.For(conditions.New(r).ResourceDeleted(worker), wait.WithTimeout(time.Second*60))
 			if err != nil {
 				t.Errorf("error waiting for worker pod deletion: %s", err)
 			}
