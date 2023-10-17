@@ -99,8 +99,9 @@ func isCompleted(status corev1.PodStatus) bool {
 func (c *Controller) handleWorker(ctx context.Context, scheduler *corev1.Service, cluster *daskv1alpha1.Cluster) error {
 	fieldManager := "dask-operator-worker"
 	name := fmt.Sprintf("%s-worker", cluster.Name)
+	workerLabels := labels.SelectorFromSet(clusterLabels(cluster, "worker"))
 
-	pods, err := c.pods.Lister().Pods(cluster.Namespace).List(labels.SelectorFromSet(clusterLabels(cluster, "worker")))
+	pods, err := c.pods.Lister().Pods(cluster.Namespace).List(workerLabels)
 	if err != nil {
 		return err
 	}
@@ -122,7 +123,10 @@ func (c *Controller) handleWorker(ctx context.Context, scheduler *corev1.Service
 		return err
 	}
 
-	status := daskv1alpha1ac.WorkerStatus().WithReplicas(int32(len(pods)))
+	status := daskv1alpha1ac.WorkerStatus().
+		WithSelector(workerLabels.String()).
+		WithReplicas(int32(len(pods)))
+
 	for _, retiringPod := range cluster.Status.Workers.Retiring {
 		if _, ok := podIds[retiringPod.Id]; ok {
 			klog.V(1).Infof("waiting for pod %s to retire in cluster %s/%s", retiringPod.Id, cluster.Namespace, cluster.Name)
