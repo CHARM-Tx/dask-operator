@@ -1,0 +1,5 @@
+# Output of go generate ./...
+*_generated.go
+pkg/generated/
+config/
+dask-operator

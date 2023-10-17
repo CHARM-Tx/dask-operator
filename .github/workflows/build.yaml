@@ -1,0 +1,60 @@
+name: "Build & Test"
+on:
+  push:
+    tags: [v*]
+    branches: [master]
+  pull_request: ~
+
+env:
+  K8S_CODEGEN_VERSION: 0.27.4
+  CONTROLLER_GEN_VERSION: 0.13.0
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: set up buildx
+        uses: docker/setup-buildx-action@v2
+      - name: build operator image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          load: true
+          tags: dask-operator:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            K8S_CODEGEN_VERSION=${{ env.K8S_CODEGEN_VERSION }}
+            CONTROLLER_GEN_VERSION=${{ env.CONTROLLER_GEN_VERSION }}
+      - name: Create kind cluster
+        run: |
+          kind create cluster --config test/e2e/kind.yaml --kubeconfig test/e2e/kubeconfig.yaml
+      - name: Load operator images
+        run: |
+          docker pull ghcr.io/dask/dask:latest
+          kind load docker-image dask-operator:latest ghcr.io/dask/dask:latest
+      - uses: actions/setup-go@v3
+        with:
+          go-version: "^1.21"
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            go-
+      - name: install dependencies
+        run: |
+          go install \
+            k8s.io/code-generator/cmd/client-gen@v${{ env.K8S_CODEGEN_VERSION }} \
+            k8s.io/code-generator/cmd/deepcopy-gen@v${{ env.K8S_CODEGEN_VERSION }} \
+            k8s.io/code-generator/cmd/lister-gen@v${{ env.K8S_CODEGEN_VERSION }} \
+            k8s.io/code-generator/cmd/informer-gen@v${{ env.K8S_CODEGEN_VERSION }} \
+            k8s.io/code-generator/cmd/applyconfiguration-gen@v${{ env.K8S_CODEGEN_VERSION }}
+          go install sigs.k8s.io/controller-tools/cmd/controller-gen@v${{ env.CONTROLLER_GEN_VERSION }}
+      - name: test
+        run: |
+          go generate ./...
+          go test ./...
