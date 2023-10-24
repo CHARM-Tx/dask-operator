@@ -1,0 +1,26 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: dask
+spec:
+  scaleTargetRef:
+    apiVersion: dask.charmtx.com/v1alpha1
+    kind: Cluster
+    name: dask
+  minReplicas: 1
+  maxReplicas: 10
+  metrics:
+    - type: Object
+      object:
+        metric:
+          name: desired_workers
+        describedObject:
+          apiVersion: dask.charmtx.com/v1alpha1
+          kind: Cluster
+          name: dask
+        target:
+          type: AverageValue
+          averageValue: "1"
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 30
