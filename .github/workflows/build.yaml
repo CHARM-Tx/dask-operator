@@ -11,6 +11,10 @@ env:
   REGISTRY: ghcr.io
   IMAGE: ${{ github.repository }}
 
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
