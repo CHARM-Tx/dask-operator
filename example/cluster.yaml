@@ -16,7 +16,7 @@ spec:
               limits:
                 cpu: "500m"
                 memory: 512Mi
-  worker:
+  workers:
     replicas: 1
     template:
       spec:

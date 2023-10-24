@@ -1,9 +1,7 @@
 # Files in `./base/` are not intended to be user-editable
 resources:
   - ./cluster.yaml
-  - ./driver.yaml
   - ./autoscaler.yaml
-  - ./podDisruptionBudgets.yaml
 
 configurations:
   - ./nameReference.yaml
