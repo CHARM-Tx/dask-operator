@@ -10,7 +10,9 @@ spec:
         containers:
           - name: scheduler
             image: "ghcr.io/dask/dask:latest"
-            command: ["dask", "scheduler"]
+            command: ["bash", "-c"]
+            args:
+              - pip install prometheus-client && dask scheduler
             imagePullPolicy: Always
             resources:
               limits:
