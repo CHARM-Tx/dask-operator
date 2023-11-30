@@ -1,0 +1,51 @@
+apiVersion: dask.charmtx.com/v1alpha1
+kind: Cluster
+metadata:
+  name: dask
+spec:
+  scheduler:
+    template:
+      spec:
+        priorityClassName: "scheduler"
+        containers:
+          - name: scheduler
+            image: "ghcr.io/dask/dask:latest"
+            command: ["bash", "-c"]
+            args:
+              - pip install prometheus-client && dask scheduler
+            imagePullPolicy: Always
+            resources:
+              limits:
+                cpu: "500m"
+                memory: 512Mi
+  workers:
+    replicas: 1
+    template:
+      spec:
+        priorityClassName: "low-priority-job"
+        serviceAccount: research
+        containers:
+          - name: worker
+            image: "ghcr.io/dask/dask:latest"
+            imagePullPolicy: "Always"
+            command: ["dask", "worker"]
+            args:
+              - --no-nanny
+              - --name=$(DASK_WORKER_NAME)
+              - --listen-address=tcp://$(DASK_WORKER_ADDRESS):$(DASK_WORKER_PORT)
+              - --dashboard-address=$(DASK_WORKER_ADDRESS):$(DASK_DASHBOARD_PORT)
+            env:
+              # https://distributed.dask.org/en/stable/worker-memory.html#automatically-trim-memory
+              - name: MALLOC_TRIM_THRESHOLD_
+                value: "65536"
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: dask-scheduler
+spec:
+  maxUnavailable: 0
+  selector:
+    matchLabels:
+      dask.charmtx.com/cluster: dask
+      dask.charmtx.com/role: scheduler

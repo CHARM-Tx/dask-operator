@@ -11,6 +11,10 @@ env:
   REGISTRY: ghcr.io
   IMAGE: ${{ github.repository }}
 
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -105,6 +109,21 @@ jobs:
           build-args: |
             K8S_CODEGEN_VERSION=${{ env.K8S_CODEGEN_VERSION }}
             CONTROLLER_GEN_VERSION=${{ env.CONTROLLER_GEN_VERSION }}
+      - name: Bundle controller manifests
+        run: |
+          cat <<EOF >> deploy/kustomization.yaml
+          images:
+            - name: ghcr.io/charm-tx/dask-operator:latest
+              newTag: ${{ steps.meta.outputs.version }}
+          EOF
+
+          tar -czf manifests.tar.gz deploy/
+      - name: Archive manifests
+        uses: actions/upload-artifact@v3
+        with:
+          name: manifests
+          path: |
+            manifests.tar.gz
 
   release:
     runs-on: ubuntu-latest
@@ -116,6 +135,11 @@ jobs:
       - uses: actions/download-artifact@v3
         with:
           name: crds
+      - uses: actions/download-artifact@v3
+        with:
+          name: manifests
       - uses: softprops/action-gh-release@v1
         with:
-          files: dask.charmtx.com_*.yaml
+          files: |
+            dask.charmtx.com_*.yaml
+            manifests.tar.gz

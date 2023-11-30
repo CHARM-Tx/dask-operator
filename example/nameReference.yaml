@@ -1,0 +1,17 @@
+nameReference:
+  - kind: Cluster
+    group: dask.charmtx.com
+    version: v1alpha1
+    fieldSpecs:
+      - kind: HorizontalPodAutoscaler
+        group: autoscaling
+        version: v2
+        path: spec/scaleTargetRef/name
+      - kind: HorizontalPodAutoscaler
+        group: autoscaling
+        version: v2
+        path: spec/metrics/object/describedObject/name
+      - kind: PodDisruptionBudget
+        group: policy
+        version: v1
+        path: spec/selector/matchLabels/dask.charmtx.com\/cluster

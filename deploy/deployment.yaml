@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dask-controller
+spec:
+  selector:
+    matchLabels:
+      app: dask-controller
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: dask-controller
+    spec:
+      serviceAccountName: dask-controller
+      containers:
+        - name: operator
+          image: ghcr.io/charm-tx/dask-operator:latest
+          imagePullPolicy: Always
+          resources:
+            limits:
+              cpu: 100m
+              memory: 128Mi

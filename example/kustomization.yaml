@@ -1,0 +1,9 @@
+# Files in `./base/` are not intended to be user-editable
+resources:
+  - ./cluster.yaml
+  - ./autoscaler.yaml
+
+configurations:
+  - ./nameReference.yaml
+
+namePrefix: example-
